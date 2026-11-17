@@ -13,7 +13,7 @@ test("a team run: the builder works, then an evaluator that did not build it and
   const r = await runTeam({ root, task: "make n.txt say 2", model: builder, evalModel: evaluator, verify: 'test "$(cat n.txt)" = 2' });
   assert.equal(r.verdict, "pass"); assert.equal(readFileSync(join(root, "n.txt"), "utf8"), "2", "the evaluator's write was refused");
   assert.match(r.review, /no defect found/); assert.deepEqual(r.build.changed, ["n.txt"]);
-  const first = evaluator.seen[0].messages; assert.deepEqual(evaluator.seen[0].tools.sort(), ["read_file", "run_check"]);
+  const first = evaluator.seen[0].messages; assert.deepEqual(evaluator.seen[0].tools.sort(), ["read_file", "recall_context", "run_check"], "it reads, checks and can recall its own evicted context; nothing that writes");
   assert.match(first[1].content, /make n\.txt say 2/); assert.match(first[1].content, /n\.txt/); assert.ok(!JSON.stringify(first).includes("set n to 2"), "the evaluator does not get the builder's own account of its work");
   assert.ok(openMemory(root).rows().some((e) => (e.tags ?? []).includes("review") && /no defect found/.test(e.note)));
 });

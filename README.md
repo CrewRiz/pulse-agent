@@ -186,6 +186,17 @@ as usual. A large set (more than 12 tools, or more than about 6,000 characters
 of definitions) is not: the model gets `find_tool` and `call_tool` instead, and
 looks up what it needs.
 
+**Small results by default.** `read_file` returns a long file in pages, with
+the line range and the offset for the next one. `search` and `list_files` stop
+at about 6,000 characters and say how much was left out. A subagent's report is
+held to the same size. Inside a script the tools return whole results, because
+the script does the filtering.
+
+**A stable request prefix.** The tool list is the same bytes on every request
+of a session, and connector tools are sent in name order, so a provider's
+prompt cache keeps hitting. Cached tokens are counted when the endpoint reports
+them.
+
 **Context that moves out, losslessly.** See the section on chat and sessions.
 
 Each run prints the tokens the endpoint reported, and `--json` carries them.
@@ -297,7 +308,7 @@ repository: a ledger holds your project's history.
   tasks: a bug fix, a chat with context recall, a run with the learned read on,
   a bug fix delegated to a worker in a worktree and applied, and a search
   across files with and without scripts. Onboarding has
-  been run against one live local model server. Everything else in its 81 tests
+  been run against one live local model server. Everything else in its 86 tests
   runs against scripted models, fake model servers and a fake MCP server:
   connectors, team runs, background commands and the terminal approval prompt
   have not been exercised by a live model. Treat it as new.

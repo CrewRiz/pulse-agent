@@ -85,3 +85,54 @@ test("a script may make at most 200 tool calls; the next one fails inside the sc
   let made = 0; const r = await runScript(`let ok = 0, bad = ""; for (let i = 0; i < 205; i++) { try { await tools.read_file({ path: "a" }); ok++; } catch (e) { bad = e.message; } } print(ok + " ok; then: " + bad);`, { names: ["read_file"], call: async () => { made++; return { ok: true, output: "x" }; } });
   assert.match(r.output, /200 ok; then: a script may make at most 200 tool calls/); assert.equal(made, 200);
 });
+
+// ---- from the 2026-11-17 token survey (docs/internal-TOKENS, sources there): defects in the first cut of the above
+test("inside a script a tool returns the whole result, so a script can filter a large file; only what it prints is capped", async () => {
+  const root = workspace(); writeFileSync(join(root, "big.log"), Array.from({ length: 4000 }, (_, i) => (i === 137 ? "ERROR disk full on node-7" : `info line ${i} ok`)).join("\n"));
+  const model = scripted([{ tool_calls: [["script", { code: `const t = await tools.read_file({ path: "big.log" }); const lines = t.split("\\n"); print(lines.length + " lines; " + lines.filter((l) => l.startsWith("ERROR")).join(" | "));` }]] }, { content: "x" }]);
+  await runTask({ root, task: "t", model });
+  assert.match(model.seen[1].messages.at(-1).content, /4000 lines; ERROR disk full on node-7/);
+});
+
+test("read_file pages: the start of a long file with what remains, and any range on request; search and list_files are capped and say what was cut", async () => {
+  const { execute } = await import("../lib/tools.mjs"); const { ROLES } = await import("../lib/roles.mjs"); const { openMemory } = await import("../lib/memory.mjs");
+  const root = workspace(), ctx = { root, role: ROLES.builder, memory: openMemory(root) };
+  writeFileSync(join(root, "long.txt"), Array.from({ length: 900 }, (_, i) => `line ${i + 1} of the long file with some padding text`).join("\n"));
+  const head = await execute("read_file", { path: "long.txt" }, ctx); assert.match(head.output, /^line 1 of/); assert.ok(head.output.length <= 6400); assert.match(head.output, /\[lines 1-\d+ of 900; read_file with offset \d+ for more\]/);
+  const mid = await execute("read_file", { path: "long.txt", offset: 500, limit: 3 }, ctx); assert.equal(mid.output, "line 500 of the long file with some padding text\nline 501 of the long file with some padding text\nline 502 of the long file with some padding text\n[lines 500-502 of 900; read_file with offset 503 for more]");
+  const small = await execute("read_file", { path: "long.txt", offset: 899 }, ctx); assert.match(small.output, /line 900/); assert.ok(!/for more/.test(small.output));
+  for (let i = 0; i < 300; i++) writeFileSync(join(root, `file-with-a-fairly-long-name-${String(i).padStart(3, "0")}.txt`), "needle here\n");
+  const s = await execute("search", { pattern: "needle" }, ctx); assert.ok(s.output.length <= 6400, `search returned ${s.output.length}`); assert.match(s.output, /more match/);
+  const l = await execute("list_files", {}, ctx); assert.ok(l.output.length <= 6400, `list returned ${l.output.length}`); assert.match(l.output, /\d+ more file/);
+});
+
+test("the tool list is the same bytes on every request of a session, so a provider's prompt cache keeps hitting: recall is offered from the start and connector tools are in name order", async () => {
+  const root = workspace(); for (let i = 0; i < 4; i++) writeFileSync(join(root, `f${i}.txt`), "x".repeat(5000));
+  const conn = { failed: [], tools: ["zeta", "alpha", "mid"].map((n) => ({ type: "function", function: { name: `mcp__c__${n}`, description: n, parameters: { type: "object", properties: {} } } })), async call() { return { ok: true, output: "" }; }, close() {} };
+  const seenTools = []; const base = scripted([...[0, 1, 2, 3].map((i) => ({ tool_calls: [["read_file", { path: `f${i}.txt` }]] })), { content: "done" }]);
+  const model = async (a) => { seenTools.push(JSON.stringify(a.tools)); return base(a); };
+  const r = await runTask({ root, task: "read them", model, contextBudget: 9000, connectors: conn });
+  assert.equal(r.answer, "done"); assert.ok(new Set(seenTools).size === 1, "one tool list for the whole session, before and after material left the window");
+  const names = JSON.parse(seenTools[0]).map((t) => t.function.name); assert.ok(names.includes("recall_context")); assert.deepEqual(names.filter((n) => n.startsWith("mcp__")), ["mcp__c__alpha", "mcp__c__mid", "mcp__c__zeta"]);
+});
+
+test("find_tool matches on argument names and returns the whole schema; a subagent's report is capped; cached tokens are counted when reported", async () => {
+  const tools = Array.from({ length: 20 }, (_, i) => ({ type: "function", function: { name: `mcp__x__t${i}`, description: `generic thing ${i}`, parameters: { type: "object", properties: i === 9 ? { invoice_number: { type: "string", description: "the invoice to fetch ".repeat(40) }, currency: { type: "string" } } : { id: { type: "string" } }, required: [] } } }));
+  const conn = { failed: [], tools, async call() { return { ok: true, output: "" }; }, close() {} };
+  const m = scripted([{ tool_calls: [["find_tool", { query: "invoice number" }]] }, { content: "x" }]); await runTask({ root: workspace(), task: "t", model: m, connectors: conn });
+  const found = m.seen[1].messages.at(-1).content; assert.match(found, /mcp__x__t9/); assert.match(found, /"currency"/, "the schema is not cut");
+  const root = workspace(); const big = async ({ tools: ts }) => (ts.some((t) => t.function.name === "delegate") ? null : { content: "report ".repeat(3000), tool_calls: [] });
+  const parent = scripted([{ tool_calls: [["delegate", { role: "scout", task: "look" }]] }, { content: "ok" }]); const both = async (a) => (await big(a)) ?? parent(a);
+  await runTask({ root, task: "t", model: both }); const rep = parent.seen[1].messages.at(-1).content; assert.ok(rep.length < 6500, `a subagent's report came back at ${rep.length} characters`); assert.match(rep, /report cut/);
+  const cached = async () => ({ content: "hi", tool_calls: [], usage: { input: 1000, output: 5, cached: 900 } }); const r = await runTask({ root: workspace(), task: "t", model: cached }); assert.equal(r.usage.cached, 900);
+});
+
+test("a connector that lists its tools in pages is read to the end", async () => {
+  const { connectAll } = await import("../lib/mcp.mjs");
+  const srv2 = createServer((req, res) => { const c = []; req.on("data", (d) => c.push(d)); req.on("end", () => { const m = JSON.parse(Buffer.concat(c).toString("utf8") || "{}"); if (m.id === undefined) { res.writeHead(202); return res.end(); }
+    const tool = (n) => ({ name: n, inputSchema: { type: "object", properties: {} } });
+    const result = m.method === "initialize" ? { protocolVersion: "2024-11-05", capabilities: {} } : m.method === "tools/list" ? (m.params?.cursor === "p2" ? { tools: [tool("c"), tool("d")] } : { tools: [tool("a"), tool("b")], nextCursor: "p2" }) : {};
+    res.writeHead(200, { "content-type": "application/json" }); res.end(JSON.stringify({ jsonrpc: "2.0", id: m.id, result })); }); });
+  await new Promise((ok) => srv2.listen(0, "127.0.0.1", ok));
+  try { const set = await connectAll({ p: { url: `http://127.0.0.1:${srv2.address().port}/mcp` } }); assert.deepEqual(set.tools.map((t) => t.function.name), ["mcp__p__a", "mcp__p__b", "mcp__p__c", "mcp__p__d"]); set.close(); } finally { srv2.close(); }
+});
