@@ -9,7 +9,7 @@
 | `pulse-agent team "<task>"` | The builder works, then an evaluator that cannot write reviews the change. |
 | `pulse-agent soul` | Show the agent's persistent identity. `on` or `off` turns soul mode on for every project. |
 | `pulse-agent trust` | Load what this project ships: instruction files, skills, hooks, connectors, approval rules. `--revoke` undoes it. |
-| `pulse-agent allow "<rule>"` | Allow something without being asked: `run:npm test`, `run:git *`, `edit:src/*`, `mcp:files__*`. |
+| `pulse-agent allow "<rule>"` | Allow something without being asked: `run:npm test`, `run:git *`, `edit:src/*`, `mcp:files__*`, `web:search`, `web:docs.python.org`. |
 | `pulse-agent skills` | List proposed and accepted skills. `show`, `accept`, `reject <name>`. |
 | `pulse-agent lessons` | What verified runs taught. |
 | `pulse-agent connectors` | Start each configured MCP server and list its tools. |
@@ -49,7 +49,7 @@
 | Role | Tools |
 |---|---|
 | `builder` | Read, list, search, write and edit files, run scripts over tools, run commands (also in the background), delegate, propose a skill, use connectors. |
-| `scout` | List, search and read files. |
+| `scout` | List, search and read files; search and read the web. |
 | `evaluator` | Read files and run your check. |
 | `worker` | Edit files and run commands in its own git worktree. Its changes come back as a patch the builder applies with `apply_work`. |
 
@@ -70,7 +70,7 @@ The builder can delegate to a scout, an evaluator or a worker. A subagent starts
 
 ## Approvals
 
-By default the agent may edit files in the project and run your check. Any other command, and every connector call, needs a rule from `pulse-agent allow`, a yes from you in a chat, or `--yes`. With nobody to ask, the answer is no. A wildcard rule never covers a command that chains, pipes, substitutes or redirects.
+By default the agent may edit files in the project and run your check. Any other command, every connector call and every web request needs a rule from `pulse-agent allow`, a yes from you in a chat, or `--yes`. With nobody to ask, the answer is no. A wildcard rule never covers a command that chains, pipes, substitutes or redirects.
 
 ## Trust
 

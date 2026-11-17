@@ -49,6 +49,12 @@ pulse-agent allow "mcp:web__*"
 
 A remote MCP server on Cloudflare Workers, or any other host, works this way. When the connectors together offer more than 12 tools, the model is given a search over them instead of every definition.
 
+## The web
+
+`web_search` and `web_fetch` are built in and need no paid search API. A page is fetched directly, and rendered by a browser already on your machine when it needs one. A search reads a search engine's results page. To read pages through a connector instead, such as a browser worker, set `"web": { "via": "mcp__<server>__<tool>" }` in your personal settings.
+
+Only public addresses are reached: loopback, private ranges and `.local` names are refused, also at every redirect. Each site needs an approval rule: `pulse-agent allow "web:search"`, `"web:docs.python.org"` or `"web:*"`. What comes back is labelled as data from that site, not instructions, and a session that has read the web cannot propose a skill.
+
 ## Who can use them
 
 The builder can. The evaluator cannot: it reads files and runs your check, and nothing else.

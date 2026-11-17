@@ -19,7 +19,7 @@ import { openContext, forkSession } from "./lib/context.mjs";
 import { createJobs } from "./lib/jobs.mjs";
 import { shell } from "./lib/tools.mjs";
 import { makePolicy } from "./lib/approve.mjs";
-import { loadSoul, soulSetting, setSoul } from "./lib/soul.mjs";
+import { loadSoul, soulSetting, setSoul, personalSettings } from "./lib/soul.mjs";
 import { projectExtras, trust, isTrusted, personalRules, addRule, personalConnectors, savePersonalConnectors } from "./lib/trust.mjs";
 import { openSync, readSync, writeSync, closeSync } from "node:fs";
 
@@ -56,7 +56,8 @@ usage: pulse-agent <command> [options]          (run it in the project you want 
         say that this project is yours to trust. Until you do, nothing it ships is loaded: instruction files (AGENTS.md,
         CLAUDE.md), skills, hooks, connectors, or approval rules in its config. Trust is recorded outside the project.
   allow "<rule>"
-        allow something without being asked, for this project: run:npm test, run:git *, edit:src/*, mcp:files__*.
+        allow something without being asked, for this project: run:npm test, run:git *, edit:src/*, mcp:files__*,
+        web:search (searching), web:docs.python.org (reading one site), web:* (any public site).
         By default the agent may edit files in the project and run your check; any other command needs a rule, a yes
         from you in a chat, or --yes (allow everything for this run).
   skills [show|accept|reject <name>]
@@ -125,7 +126,7 @@ async function main() {
     console.log(`${was ? "already trusted" : "trusted"}: ${root}\n${x.held.length ? `now loaded on each run: ${x.held.join(", ")}` : "this project ships nothing that needs trust (no instruction files, skills, hooks, connectors or approval rules)"}\nundo with: pulse-agent trust --revoke`);
     return;
   }
-  if (cmd === "allow") { const rule = positional[0]; if (!rule || !/^(run|edit|mcp):.+/.test(rule)) fail('usage: pulse-agent allow "<rule>"   for example: pulse-agent allow "run:npm test"   or "run:git *", "edit:src/*", "mcp:files__*"'); console.log(`allowed for this project: ${addRule(root, rule).join("   ")}`); return; }
+  if (cmd === "allow") { const rule = positional[0]; if (!rule || !/^(run|edit|mcp|web):.+/.test(rule)) fail('usage: pulse-agent allow "<rule>"   for example: pulse-agent allow "run:npm test"   or "run:git *", "edit:src/*", "mcp:files__*", "web:search", "web:docs.python.org", "web:*"'); console.log(`allowed for this project: ${addRule(root, rule).join("   ")}`); return; }
   if (cmd === "connectors") {
     const all = (n) => argv.flatMap((a, i) => (a === n && argv[i + 1] !== undefined ? [argv[i + 1]] : []));
     if (positional[0] === "add" || positional[0] === "remove") {
@@ -165,7 +166,7 @@ async function main() {
     const w = (t) => process.stdout.write(t); let midLine = false;
     const show = (e) => { if (e.type === "delta") { w(e.text); midLine = true; return; } if (midLine) { w("\n"); midLine = false; }
       console.log(`${e.who ? `[${e.who}] ` : ""}${e.type === "tool" ? `  ${e.refused ? "refused" : e.ok ? "ok     " : "failed "} ${e.name}${e.args?.path ? ` ${e.args.path}` : e.args?.command ? ` ${String(e.args.command).slice(0, 80)}` : e.args?.task ? ` ${String(e.args.task).slice(0, 60)}` : ""}` : e.type === "context" ? `  context: ${e.stored} item(s) moved to the recoverable store (${e.total} stored)` : e.type === "connector" ? `  connector ${e.name} did not start: ${e.reason}` : `  check ${e.ok ? "passed" : `failed (exit ${e.code})`}`}`); };
-    const setup = { ...projectSetup(verify, { interactive: true }), soul: soulForRun() }; let turn = null;
+    const setup = { ...projectSetup(verify, { interactive: true }), soul: soulForRun(), web: personalSettings().web ?? {} }; let turn = null;
     const jobs = createJobs({ cwd: root }); process.on("exit", () => jobs.killAll());            // background commands live across turns and stop when the chat ends
     process.on("SIGINT", () => { if (turn) { turn.abort(); process.stdout.write("\n  interrupting (the session is kept)...\n"); } else { if (sessionId) console.log(`\nsession: ${sessionId} (saved; pulse-agent chat --resume ${sessionId})`); process.exit(130); } });
     const llm = openaiCompatible({ baseUrl, model, apiKey });
@@ -203,7 +204,7 @@ async function main() {
     const baseUrl = opt("--base-url") ?? process.env.PULSE_AGENT_BASE_URL ?? cfg.baseUrl, apiKey = opt("--api-key") ?? process.env.PULSE_AGENT_API_KEY, verify = opt("--verify") ?? cfg.verify;
     const asJson = argv.includes("--json"), say = asJson ? () => {} : console.log;                // --json: one JSON object per line, the last of type "end", and nothing else on stdout
     const show = (e) => asJson ? process.stdout.write(JSON.stringify(e) + "\n") : e.type === "delta" ? process.stdout.write(e.text) : console.log(`${e.who ? `[${e.who}] ` : ""}${e.type === "context" ? `  context: ${e.stored} item(s) moved to the recoverable store` : e.type === "tool" ? `  ${e.refused ? "refused" : e.ok ? "ok     " : "failed "} ${e.name}${e.args?.path ? ` ${e.args.path}` : e.args?.command ? ` ${String(e.args.command).slice(0, 80)}` : ""}` : e.type === "connector" ? `  connector ${e.name} did not start: ${e.reason}` : `  check ${e.ok ? "passed" : `failed (exit ${e.code})`}`}`);
-    const common = { root, task, verify, stream: argv.includes("--stream"), script: !argv.includes("--no-script"), soul: soulForRun(), maxSteps: num("--max-steps", 30), maxRounds: num("--max-rounds", 3), ...projectSetup(verify), onEvent: show,
+    const common = { root, task, verify, stream: argv.includes("--stream"), script: !argv.includes("--no-script"), soul: soulForRun(), web: personalSettings().web ?? {}, maxSteps: num("--max-steps", 30), maxRounds: num("--max-rounds", 3), ...projectSetup(verify), onEvent: show,
       learned: argv.includes("--no-learned") || !process.env.MEMORY_PULSE_KEY ? null : { key: process.env.MEMORY_PULSE_KEY, api: process.env.MEMORY_PULSE_API },
       model: openaiCompatible({ baseUrl, model, apiKey }) };
     let r, review = null;

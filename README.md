@@ -113,7 +113,7 @@ a model cannot argue its way past it.
 | Role | Tools |
 |---|---|
 | `builder` (default) | read, list, search, write and edit files, run commands, delegate, propose a skill |
-| `scout` | list, search and read files |
+| `scout` | list, search and read files; search and read the web |
 | `evaluator` | read files, run the `--verify` command and nothing else |
 
 ```sh
@@ -257,7 +257,7 @@ the same time.
 
 | Role | What it can do |
 |---|---|
-| `scout` | list, search and read files |
+| `scout` | list, search and read files; search and read the web |
 | `evaluator` | read files and run your check |
 | `worker` | edit files and run commands, in its own git worktree |
 
@@ -267,6 +267,36 @@ changes come back as a patch with a work id, and nothing is applied until the
 builder calls `apply_work`. A patch that no longer fits is refused whole. At
 most three workers run at once. Outside a git repository, or with no commit, a
 worker is refused; it is not run in place.
+
+## The web
+
+`web_search` and `web_fetch` need no paid search API. A page is fetched
+directly. If it comes back with almost no text, or the site challenges a plain
+request, a Chromium-family browser already on your machine renders it
+(headless, with a throwaway profile). A search is a search engine's own results
+page, read the same way and reduced to titles, links and snippets. You can also
+have pages read through a connector, for example a browser worker you run:
+set `"web": { "via": "mcp__browser__browser_markdown" }` in your personal
+settings.
+
+The web is the widest thing a model can be handed, so the guards are in code:
+
+- **Public addresses only.** Loopback, private ranges, link-local and `.local`
+  names are refused, by name and by what the name resolves to, and again at
+  every redirect. A public page cannot be a doorway to a machine on your
+  network.
+- **Approval by site.** `pulse-agent allow "web:search"` allows searching,
+  `"web:docs.python.org"` one site, `"web:*"` any public site. In a terminal
+  chat you are asked.
+- **Data, not instructions.** What comes back is labelled with the site it came
+  from and a reminder that it is not an instruction, and it is capped and paged.
+- **No skills from a session that read the web.** A proposed skill is refused
+  there, so what a page says cannot become a standing procedure.
+
+Limits: the address check covers the request and its redirects. A page that the
+local browser renders can itself load other addresses, and those are not
+checked. Search engines limit automated requests; when that happens the tool
+says so. Set another results page with `"web": { "searchUrl": "...{query}" }`.
 
 ## Connectors
 
@@ -335,9 +365,9 @@ repository: a ledger holds your project's history.
   same major Node version that packed it; if the arithmetic ever differs, unpack fails on the checksum.
 - This version has been run end to end against one hosted model on four small
   tasks: a bug fix, a chat with context recall, a run with the learned read on,
-  a bug fix delegated to a worker in a worktree and applied, and a search
-  across files with and without scripts. Onboarding has
-  been run against one live local model server. Everything else in its 95 tests
+  a bug fix delegated to a worker in a worktree and applied, a search
+  across files with and without scripts, and a web search with a page read. Onboarding has
+  been run against one live local model server. Everything else in its 103 tests
   runs against scripted models, fake model servers and a fake MCP server:
   connectors, team runs, background commands and the terminal approval prompt
   have not been exercised by a live model. Treat it as new.
