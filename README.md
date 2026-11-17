@@ -167,14 +167,16 @@ repository: a ledger holds your project's history.
   when you only want a review.
 - One provider shape: OpenAI-compatible chat completions with tool calls.
 - A connector is not confined to the project. Configure only servers you trust.
-- A small model may answer in prose and never call a tool. The run then ends
-  with a failed check and nothing is learned.
+- `init` checks that a model can call a tool at all. That is not a test of
+  competence: a 1.5 billion parameter model passed it and then failed a real
+  task by answering in prose. Such a run ends with a failed check and nothing
+  is learned.
 - The packer keeps about 70 MB of model state in memory while it runs, and a packed file should be unpacked by the
   same major Node version that packed it; if the arithmetic ever differs, unpack fails on the checksum.
 - This version has been run end to end on two small tasks against one hosted
   model, and against scripted models, fake model servers and a fake MCP server
-  in its 38 tests. Onboarding, connectors and team runs have not yet been run
-  against a live local model. In the live run with the
+  in its 38 tests. Onboarding has been run against one live local model server;
+  connectors and team runs have run against fakes only. In the live run with the
   learned read on, the engine answered and named no correction on a 7-row
   ledger. Treat it as new.
 
