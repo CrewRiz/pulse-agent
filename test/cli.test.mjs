@@ -18,7 +18,7 @@ const call = (name, args) => ({ role: "assistant", content: null, tool_calls: [{
 
 test("help names every command; an unknown command and a run without a model say what to do and exit 1", async () => {
   const root = workspace();
-  const h = await run(root, ["--help"]); assert.equal(h.code, 0); for (const w of ["run", "skills", "lessons", "sync", "state export", "--verify", "--role", "--no-learned", "PULSE_AGENT_MODEL", "MEMORY_PULSE_KEY", "init", "team", "connectors", "chat", "sessions"]) assert.match(h.out, new RegExp(w));
+  const h = await run(root, ["--help"]); assert.equal(h.code, 0); for (const w of ["run", "skills", "lessons", "sync", "state export", "--verify", "--role", "--no-learned", "PULSE_AGENT_MODEL", "MEMORY_PULSE_KEY", "init", "team", "connectors", "chat", "sessions", "trust", "allow", "--yes"]) assert.match(h.out, new RegExp(w));
   const u = await run(root, ["frobnicate"]); assert.equal(u.code, 1); assert.match(u.out, /unknown command/);
   const n = await run(root, ["run", "do a thing"]); assert.equal(n.code, 1); assert.match(n.out, /pulse-agent init/);
 });
@@ -87,6 +87,8 @@ test("connectors: lists each configured MCP server's tools, names one that fails
   const root = workspace(); const fake = join(fileURLToPath(new URL(".", import.meta.url)), "fixtures", "fake-mcp.mjs");
   assert.match((await run(root, ["connectors"])).out, /no connectors configured/);
   mkdirSync(join(root, ".pulse-agent"), { recursive: true }); writeFileSync(join(root, ".pulse-agent", "config.json"), JSON.stringify({ mcpServers: { files: { command: process.execPath, args: [fake], tools: ["echo"] }, gone: { command: "/nonexistent/x" } } }));
+  const held = await run(root, ["connectors"]); assert.equal(held.code, 1); assert.match(held.out, /not started until you trust it/);
+  assert.match((await run(root, ["trust"])).out, /now loaded on each run: connectors/);
   const c = await run(root, ["connectors"]); assert.equal(c.code, 1); assert.match(c.out, /files: echo/); assert.match(c.out, /gone: FAILED/);
 });
 
@@ -108,5 +110,32 @@ test("chat: an interactive session streams each reply, keeps the conversation ac
     assert.equal(bodies[2].messages.filter((m) => m.role === "user").length, 3, "a resumed chat carries the earlier turns");
     const none = await chat(root, ["--resume", "nope"], "x\n"); assert.equal(none.code, 1); assert.match(none.out, /no session named nope/);
     const { openMemory } = await import("../lib/memory.mjs"); assert.equal(openMemory(root).rows().filter((e) => (e.tags ?? []).includes("run")).length, 0, "a chat turn that changed no file writes no run row");
+  } finally { srv.close(); }
+});
+
+test("approvals from the command line: a command the model wants to run is refused until a rule, or --yes, allows it; edits in the project are allowed", async () => {
+  const bodies = []; let step = 0;
+  const srv = createServer((req, res) => { const c = []; req.on("data", (d) => c.push(d)); req.on("end", () => { bodies.push(JSON.parse(Buffer.concat(c).toString("utf8"))); const m = [call("write_file", { path: "a.txt", content: "x" }), call("run", { command: "touch made.txt" }), { role: "assistant", content: "done" }][Math.min(step++, 2)]; res.writeHead(200, { "content-type": "application/json" }); res.end(JSON.stringify({ choices: [{ message: m }] })); }); });
+  await new Promise((ok) => srv.listen(0, "127.0.0.1", ok)); const url = `http://127.0.0.1:${srv.address().port}/v1`;
+  try {
+    const root = workspace(), args = ["run", "do it", "--model", "m", "--base-url", url];
+    const a = await run(root, args); assert.equal(a.code, 0, a.out); assert.ok(existsSync(join(root, "a.txt"))); assert.equal(existsSync(join(root, "made.txt")), false); assert.match(a.out, /refused run touch made\.txt/); assert.match(a.out, /1 tool call\(s\) were refused/);
+    assert.match(bodies[2].messages.at(-1).content, /no rule allows/);
+    step = 0; assert.match((await run(root, ["allow", "run:touch made.txt"])).out, /run:touch made\.txt/);
+    await run(root, args); assert.ok(existsSync(join(root, "made.txt")), "the saved rule allows exactly that command");
+    const other = workspace(); step = 0; await run(other, [...args, "--yes"]); assert.ok(existsSync(join(other, "made.txt")), "--yes allows everything for one run");
+    assert.equal((await run(root, ["allow", "anything goes"])).code, 1);
+  } finally { srv.close(); }
+});
+
+test("trust from the command line: a project's AGENTS.md reaches the model only after `pulse-agent trust`, and --revoke takes it away", async () => {
+  const bodies = []; const srv = createServer((req, res) => { const c = []; req.on("data", (d) => c.push(d)); req.on("end", () => { bodies.push(JSON.parse(Buffer.concat(c).toString("utf8"))); res.writeHead(200, { "content-type": "application/json" }); res.end(JSON.stringify({ choices: [{ message: { role: "assistant", content: "ok" } }] })); }); });
+  await new Promise((ok) => srv.listen(0, "127.0.0.1", ok)); const url = `http://127.0.0.1:${srv.address().port}/v1`;
+  try {
+    const root = workspace(); writeFileSync(join(root, "AGENTS.md"), "Use tabs. MARKER-RULE-42"); const args = ["run", "hello", "--model", "m", "--base-url", url];
+    const a = await run(root, args); assert.match(a.out, /not loaded, because this project is not trusted yet: AGENTS\.md/); assert.ok(!bodies[0].messages[0].content.includes("MARKER-RULE-42"));
+    assert.match((await run(root, ["trust"])).out, /now loaded on each run: AGENTS\.md/);
+    const b = await run(root, args); assert.ok(!/not trusted/.test(b.out)); assert.ok(bodies[1].messages[0].content.includes("MARKER-RULE-42"));
+    await run(root, ["trust", "--revoke"]); await run(root, args); assert.ok(!bodies[2].messages[0].content.includes("MARKER-RULE-42"));
   } finally { srv.close(); }
 });

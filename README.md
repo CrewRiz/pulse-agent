@@ -120,6 +120,32 @@ a model cannot argue its way past it.
 pulse-agent run "review the date parser change" --role evaluator --verify "npm test"
 ```
 
+## Approvals and trust
+
+By default the agent may edit files inside the project and run your check.
+Anything else that changes something needs your permission: any other shell
+command, and every connector call.
+
+```sh
+pulse-agent allow "run:npm run build"     # allow one command for this project
+pulse-agent allow "run:git *"             # a wildcard never covers a command that chains, pipes or redirects
+pulse-agent run "..." --yes               # allow everything for one run
+```
+
+In a chat on a terminal you are asked instead: yes once, always, or no. With
+nobody to ask, the answer is no, and the model is told why. A deny rule in the
+project's config beats any allow. The question is put to you; a model's text or
+a tool's output can never answer it.
+
+A project can ship things that act on your machine or steer the model:
+`AGENTS.md` and `CLAUDE.md`, skills in `.agents/skills` or `.claude/skills`,
+a pre-tool hook, connectors, and approval rules in its config. None of it is
+loaded until you run `pulse-agent trust` in that project. Trust is recorded
+outside the project, so a checkout cannot trust itself.
+
+Ctrl+C during a chat turn stops the turn, kills the running command and
+everything it started, and keeps the session.
+
 ## Chat, sessions and context that is never lost
 
 ```sh
@@ -193,13 +219,14 @@ repository: a ledger holds your project's history.
 ## Limits
 
 - **`run` is a real shell.** File tools cannot leave the project directory, but
-  a command the model runs has your user's permissions. Use a container or a
-  throwaway checkout for work you do not trust, and prefer the evaluator role
-  when you only want a review.
+  a command that is allowed to run has your user's permissions. Use a container
+  or a throwaway checkout for work you do not trust.
 - One provider shape: OpenAI-compatible chat completions with tool calls.
-- There are no approval prompts: in a run or a chat the builder edits files and
-  runs commands without asking. Subagents are read-only. Ctrl+C during a turn
-  stops the process; the turn in progress is not saved.
+- There is no sandbox. A command the agent is allowed to run has your user's
+  permissions. The approval rules decide which commands run, not what they can
+  reach.
+- Approval prompts appear only in a chat on a terminal. Everywhere else an
+  unlisted command is refused.
 - Under a very small context budget a model can lose track of its own work.
   The default budget is 200,000 characters; the record of work done is kept in
   the window to prevent repeats.
@@ -212,7 +239,7 @@ repository: a ledger holds your project's history.
   same major Node version that packed it; if the arithmetic ever differs, unpack fails on the checksum.
 - This version has been run end to end on two small tasks against one hosted
   model, and against scripted models, fake model servers and a fake MCP server
-  in its 55 tests. Onboarding has been run against one live local model server,
+  in its 65 tests. Onboarding has been run against one live local model server,
   and chat, streaming and context recall against one hosted model; connectors,
   team runs and delegation have run against fakes only. In the live run with the
   learned read on, the engine answered and named no correction on a 7-row

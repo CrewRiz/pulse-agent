@@ -7,6 +7,8 @@
 | `pulse-agent chat` | An interactive session. Replies stream; the conversation carries across turns. `--resume <session>` continues one. |
 | `pulse-agent sessions` | List this project's sessions. |
 | `pulse-agent team "<task>"` | The builder works, then an evaluator that cannot write reviews the change. |
+| `pulse-agent trust` | Load what this project ships: instruction files, skills, hooks, connectors, approval rules. `--revoke` undoes it. |
+| `pulse-agent allow "<rule>"` | Allow something without being asked: `run:npm test`, `run:git *`, `edit:src/*`, `mcp:files__*`. |
 | `pulse-agent skills` | List proposed and accepted skills. `show`, `accept`, `reject <name>`. |
 | `pulse-agent lessons` | What verified runs taught. |
 | `pulse-agent connectors` | Start each configured MCP server and list its tools. |
@@ -26,6 +28,7 @@
 | `--eval-model <name>` | `team` only. A different model for the evaluator. |
 | `--stream` | `run` and `team`: print the reply as it is written. `chat` always streams. |
 | `--context-budget <n>` | Characters the conversation may hold before older material moves to the recoverable store. Default 200000. |
+| `--yes` | Allow every edit, command and connector call for this run. Deny rules still apply. |
 | `--no-learned` | Do not ask the memory-pulse engine, even with a key set. |
 
 ## Inside a chat
@@ -60,6 +63,14 @@ The builder can delegate a question to a scout or an evaluator. A subagent start
 
 0: the check passed, or no check was configured. 2: the check failed. 1: an error.
 
+## Approvals
+
+By default the agent may edit files in the project and run your check. Any other command, and every connector call, needs a rule from `pulse-agent allow`, a yes from you in a chat, or `--yes`. With nobody to ask, the answer is no. A wildcard rule never covers a command that chains, pipes, substitutes or redirects.
+
+## Trust
+
+Instruction files (`AGENTS.md`, `CLAUDE.md`), skills in `.agents/skills` and `.claude/skills`, a pre-tool hook, connectors and approval rules in the project's config are loaded only after `pulse-agent trust`. Trust is recorded outside the project.
+
 ## Limits
 
-There are no approval prompts: the builder edits and runs without asking. The `run` tool is a real shell with your user's permissions. File tools cannot leave the project folder; commands can. Use a container or a disposable checkout for work you do not trust.
+There is no sandbox. A command that is allowed to run has your user's permissions. File tools cannot leave the project folder; commands can. Use a container or a disposable checkout for work you do not trust.

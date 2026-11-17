@@ -20,6 +20,8 @@ Put it in `.pulse-agent/config.json`, in the same shape other agents use:
 
 `tools` is optional. With it, the model is offered only the tools you name.
 
+Connectors in a project's config are started only after you run `pulse-agent trust` there. Each call also needs an approval rule, for example `pulse-agent allow "mcp:files__*"`, or `--yes`.
+
 Check that it starts and see what it offers:
 
 ```sh
@@ -34,6 +36,6 @@ The builder can. The evaluator cannot: it reads files and runs your check, and n
 
 ## What to know
 
-A connector runs as its own process with your user's permissions. It is not held inside the project folder the way the file tools are. Configure servers you trust and use the `tools` list.
+A connector runs as its own process with your user's permissions and a minimal environment: your API keys and tokens are not passed to it unless the config names them under `env` or `passEnv`. It is not held inside the project folder the way the file tools are. Configure servers you trust and use the `tools` list.
 
 A connector that fails to start is reported and skipped. The run goes on without it.

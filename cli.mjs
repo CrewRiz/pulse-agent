@@ -17,6 +17,9 @@ import { readFileSync, writeFileSync, mkdirSync, readdirSync } from "node:fs";
 import { createInterface } from "node:readline";
 import { openContext } from "./lib/context.mjs";
 import { shell } from "./lib/tools.mjs";
+import { makePolicy } from "./lib/approve.mjs";
+import { projectExtras, trust, isTrusted, personalRules, addRule } from "./lib/trust.mjs";
+import { openSync, readSync, writeSync, closeSync } from "node:fs";
 
 const HELP = `pulse-agent — a coding agent that improves only on evidence
 
@@ -26,7 +29,7 @@ usage: pulse-agent <command> [options]          (run it in the project you want 
         set this project up without questions: find a model server running on this machine (Ollama, LM Studio, llama.cpp,
         MLX, vLLM), pick the first model that really calls a tool, find the project's own test command, and save
         .pulse-agent/config.json. Run it once per project.
-  run "<task>" [--verify "<command>"] [--role builder|evaluator] [--model M] [--base-url URL] [--max-steps N] [--max-rounds N] [--no-learned]
+  run "<task>" [--verify "<command>"] [--role builder|evaluator] [--model M] [--base-url URL] [--max-steps N] [--max-rounds N] [--no-learned] [--yes]
         work on the task with tools confined to this directory. With --verify, that command decides whether the task
         succeeded (exit 0 = pass); a failure goes back to the model, up to --max-rounds times (default 3).
         Exit code: 0 pass or unverified, 2 the check failed, 1 an error.
@@ -41,6 +44,13 @@ usage: pulse-agent <command> [options]          (run it in the project you want 
   connectors
         start each connector in .pulse-agent/config.json ("mcpServers", the same shape other agents use) and list its tools.
         A connector is any MCP server. The builder can call them; the evaluator cannot.
+  trust [--revoke]
+        say that this project is yours to trust. Until you do, nothing it ships is loaded: instruction files (AGENTS.md,
+        CLAUDE.md), skills, hooks, connectors, or approval rules in its config. Trust is recorded outside the project.
+  allow "<rule>"
+        allow something without being asked, for this project: run:npm test, run:git *, edit:src/*, mcp:files__*.
+        By default the agent may edit files in the project and run your check; any other command needs a rule, a yes
+        from you in a chat, or --yes (allow everything for this run).
   skills [show|accept|reject <name>]
         procedures the agent proposed after verified runs. A proposal is never used until you accept it.
   lessons
@@ -62,6 +72,15 @@ back, and before each task the ledger is asked whether the same thing was alread
                          task (the learned read). That sends the ledger's rows to the engine. --no-learned turns it off.`;
 
 const argv = process.argv.slice(2), cmd = argv[0], root = process.cwd();
+// what the project ships (loaded only if trusted) and the approval policy for this run
+function projectSetup(verify, { interactive = false } = {}) {
+  const x = projectExtras(root);
+  if (x.held.length) console.log(`not loaded, because this project is not trusted yet: ${x.held.join(", ")}. Look at them, then run \`pulse-agent trust\`.`);
+  const ask = interactive && process.stdin.isTTY ? async (q) => { let fd; try { fd = openSync("/dev/tty", "r+"); writeSync(fd, `\n  allow ${q.text} ?  [y]es once, [a]lways, [n]o: `); const b = Buffer.alloc(64), n = readSync(fd, b, 0, 64); return b.toString("utf8", 0, n).trim() || "n"; } catch { return "n"; } finally { if (fd !== undefined) closeSync(fd); } } : null;
+  const policy = makePolicy(argv.includes("--yes") ? { mode: "auto", deny: x.approvals?.deny ?? [] } : { mode: x.approvals?.mode ?? "ask", deny: x.approvals?.deny ?? [],
+    allow: ["edit:*", ...(verify ? [`run:${verify}`] : []), ...(x.approvals?.allow ?? []), ...personalRules(root)], approver: ask, onRule: (r) => { addRule(root, r); console.log(`  saved: ${r}`); } });
+  return { policy, hooks: x.hooks, instructions: x.instructions, projectSkills: x.skills, mcpServers: x.mcpServers };
+}
 const VALUED = new Set(["--verify", "--role", "--model", "--base-url", "--api-key", "--max-steps", "--max-rounds", "--eval-model", "--resume", "--context-budget"]);
 const opt = (name) => { const i = argv.indexOf(name); return i >= 0 ? argv[i + 1] : undefined; };
 const positional = argv.slice(1).filter((a, i, all) => !a.startsWith("--") && !VALUED.has(all[i - 1]));
@@ -75,7 +94,15 @@ async function main() {
     const r = await onboard({ root, endpoints: base ? [base] : undefined, model: opt("--model"), apiKey: opt("--api-key") ?? process.env.PULSE_AGENT_API_KEY, force: argv.includes("--force") });
     console.log(r.report); process.exit(r.ok ? 0 : 1);
   }
+  if (cmd === "trust") {
+    if (argv.includes("--revoke")) { trust(root, false); return console.log("this project is no longer trusted"); }
+    const was = isTrusted(root); trust(root, false); const x = projectExtras(root); trust(root, true);
+    console.log(`${was ? "already trusted" : "trusted"}: ${root}\n${x.held.length ? `now loaded on each run: ${x.held.join(", ")}` : "this project ships nothing that needs trust (no instruction files, skills, hooks, connectors or approval rules)"}\nundo with: pulse-agent trust --revoke`);
+    return;
+  }
+  if (cmd === "allow") { const rule = positional[0]; if (!rule || !/^(run|edit|mcp):.+/.test(rule)) fail('usage: pulse-agent allow "<rule>"   for example: pulse-agent allow "run:npm test"   or "run:git *", "edit:src/*", "mcp:files__*"'); console.log(`allowed for this project: ${addRule(root, rule).join("   ")}`); return; }
   if (cmd === "connectors") {
+    if (!isTrusted(root) && loadConfig(root).mcpServers) fail("this project's connectors are not started until you trust it: look at .pulse-agent/config.json, then run `pulse-agent trust`");
     const servers = loadConfig(root).mcpServers ?? {}; if (!Object.keys(servers).length) return console.log('no connectors configured. Add MCP servers under "mcpServers" in .pulse-agent/config.json, for example:\n  { "mcpServers": { "files": { "command": "npx", "args": ["-y", "<an MCP server package>"], "tools": ["read"] } } }');
     const set = await connectAll(servers);
     try { for (const name of Object.keys(servers)) { const f = set.failed.find((x) => x.name === name); console.log(f ? `${name}: FAILED: ${f.reason}` : `${name}: ${set.tools.filter((t) => t.function.name.startsWith(`mcp__${name}__`)).map((t) => t.function.name.split("__")[2]).join(", ") || "no tools"}`); } } finally { set.close(); }
@@ -95,6 +122,8 @@ async function main() {
     const w = (t) => process.stdout.write(t); let midLine = false;
     const show = (e) => { if (e.type === "delta") { w(e.text); midLine = true; return; } if (midLine) { w("\n"); midLine = false; }
       console.log(`${e.who ? `[${e.who}] ` : ""}${e.type === "tool" ? `  ${e.refused ? "refused" : e.ok ? "ok     " : "failed "} ${e.name}${e.args?.path ? ` ${e.args.path}` : e.args?.command ? ` ${String(e.args.command).slice(0, 80)}` : e.args?.task ? ` ${String(e.args.task).slice(0, 60)}` : ""}` : e.type === "context" ? `  context: ${e.stored} item(s) moved to the recoverable store (${e.total} stored)` : e.type === "connector" ? `  connector ${e.name} did not start: ${e.reason}` : `  check ${e.ok ? "passed" : `failed (exit ${e.code})`}`}`); };
+    const setup = projectSetup(verify, { interactive: true }); let turn = null;
+    process.on("SIGINT", () => { if (turn) { turn.abort(); process.stdout.write("\n  interrupting (the session is kept)...\n"); } else { if (sessionId) console.log(`\nsession: ${sessionId} (saved; pulse-agent chat --resume ${sessionId})`); process.exit(130); } });
     const llm = openaiCompatible({ baseUrl, model, apiKey });
     console.log(`pulse-agent chat: ${model}${verify ? `, check \`${verify}\` runs after a turn that changes files` : ", no check configured"}. /help for commands, /exit to leave.`);
     const rl = createInterface({ input: process.stdin, terminal: false });
@@ -109,8 +138,10 @@ async function main() {
       else if (line === "/check") { if (!verify) console.log("no check command configured"); else { const v = await shell(verify, { cwd: root }); console.log(`${v.output}\ncheck ${v.ok ? "passed" : `failed (exit ${v.code})`}`); } }
       else if (line.startsWith("/")) console.log(`unknown command ${line}; /help lists them`);
       else {
-        const r = await runTask({ root, task: line, model: llm, verify, stream: true, quiet: true, sessionId, resume: started, onEvent: show, mcpServers: cfg.mcpServers ?? null, ...(budget ? { contextBudget: budget } : {}),
+        turn = new AbortController();
+        const r = await runTask({ root, task: line, model: llm, verify, stream: true, quiet: true, sessionId, resume: started, onEvent: show, ...setup, signal: turn.signal, ...(budget ? { contextBudget: budget } : {}),
           learned: argv.includes("--no-learned") || !process.env.MEMORY_PULSE_KEY ? null : { key: process.env.MEMORY_PULSE_KEY, api: process.env.MEMORY_PULSE_API } });
+        turn = null; if (r.stopped === "interrupted") console.log("  interrupted. Say what to do next, or /exit.");
         sessionId = r.session; started = true; if (midLine) { w("\n"); midLine = false; }
         if (r.changed.length) console.log(`  files changed: ${r.changed.join(", ")}${r.verdict !== "unverified" ? `, verdict: ${r.verdict}` : ""}`);
       }
@@ -126,7 +157,7 @@ async function main() {
     const num = (n, d) => { const v = opt(n); if (v === undefined) return d; const x = Number(v); if (!Number.isInteger(x) || x < 1) fail(`${n} must be a whole number of 1 or more`); return x; };
     const baseUrl = opt("--base-url") ?? process.env.PULSE_AGENT_BASE_URL ?? cfg.baseUrl, apiKey = opt("--api-key") ?? process.env.PULSE_AGENT_API_KEY, verify = opt("--verify") ?? cfg.verify;
     const show = (e) => e.type === "delta" ? process.stdout.write(e.text) : console.log(`${e.who ? `[${e.who}] ` : ""}${e.type === "context" ? `  context: ${e.stored} item(s) moved to the recoverable store` : e.type === "tool" ? `  ${e.refused ? "refused" : e.ok ? "ok     " : "failed "} ${e.name}${e.args?.path ? ` ${e.args.path}` : e.args?.command ? ` ${String(e.args.command).slice(0, 80)}` : ""}` : e.type === "connector" ? `  connector ${e.name} did not start: ${e.reason}` : `  check ${e.ok ? "passed" : `failed (exit ${e.code})`}`}`);
-    const common = { root, task, verify, stream: argv.includes("--stream"), maxSteps: num("--max-steps", 30), maxRounds: num("--max-rounds", 3), mcpServers: cfg.mcpServers ?? null, onEvent: show,
+    const common = { root, task, verify, stream: argv.includes("--stream"), maxSteps: num("--max-steps", 30), maxRounds: num("--max-rounds", 3), ...projectSetup(verify), onEvent: show,
       learned: argv.includes("--no-learned") || !process.env.MEMORY_PULSE_KEY ? null : { key: process.env.MEMORY_PULSE_KEY, api: process.env.MEMORY_PULSE_API },
       model: openaiCompatible({ baseUrl, model, apiKey }) };
     let r, review = null;
@@ -138,6 +169,7 @@ async function main() {
     console.log(`verdict: ${r.verdict}${r.stopped ? ` (stopped at the ${r.stopped})` : ""} · ${r.steps} step(s)${r.rounds ? ` · ${r.rounds} check round(s)` : ""}`);
     console.log(`files changed: ${r.changed.join(", ") || "none"}`);
     if (cmd === "team") console.log(review ? `\nevaluator's review:\n${review}\n` : "no review: nothing changed, or the check failed");
+    if (r.refused) console.log(`${r.refused} tool call(s) were refused by the approval rules. Allow one with: pulse-agent allow "<rule>", or rerun with --yes to allow everything.`);
     if (r.proposed.length) console.log(`skills proposed (held for you): ${r.proposed.join(", ")} — pulse-agent skills`);
     if (r.verdict === "unverified") console.log("no check command: this run is on the record as unverified and taught nothing (pass --verify, or run `pulse-agent init`)");
     process.exit(r.verdict === "fail" ? 2 : 0);
