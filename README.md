@@ -265,13 +265,13 @@ repository: a ledger holds your project's history.
   is learned.
 - The packer keeps about 70 MB of model state in memory while it runs, and a packed file should be unpacked by the
   same major Node version that packed it; if the arithmetic ever differs, unpack fails on the checksum.
-- This version has been run end to end on two small tasks against one hosted
-  model, and against scripted models, fake model servers and a fake MCP server
-  in its 74 tests. Onboarding has been run against one live local model server,
-  and chat, streaming and context recall against one hosted model; connectors,
-  team runs and delegation have run against fakes only. In the live run with the
-  learned read on, the engine answered and named no correction on a 7-row
-  ledger. Treat it as new.
+- This version has been run end to end against one hosted model on four small
+  tasks: a bug fix, a chat with context recall, a run with the learned read on,
+  and a bug fix delegated to a worker in a worktree and applied. Onboarding has
+  been run against one live local model server. Everything else in its 74 tests
+  runs against scripted models, fake model servers and a fake MCP server:
+  connectors, team runs, background commands and the terminal approval prompt
+  have not been exercised by a live model. Treat it as new.
 
 ## Development
 
