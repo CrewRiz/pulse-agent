@@ -24,17 +24,7 @@ pulse-agent state import <file>.rainz
 
 ## The packer
 
-State files are compressed by a packer built for this kind of text, a context-mixing coder in the PAQ family.
-
-Measured on one real ledger of 4,236 rows (4.78 MB):
-
-| Method | Size |
-|---|---|
-| pulse-agent packer | 1.40 MB |
-| brotli, maximum setting | 1.49 MB |
-| gzip -9 | 1.90 MB |
-
-It is slow: about 9 seconds to pack that ledger and 17 to unpack, on a laptop. It holds about 70 MB in memory while it runs.
+State files are compressed by a packer built for this kind of text, a context-mixing coder in the PAQ family. On our own ledger it made a smaller file than brotli at its maximum setting and than gzip -9. It is much slower than either, and it holds its model tables in memory while it runs. The measurement, with its input and commands, is in the repository's README.
 
 The SHA-256 of the original bytes is stored in the file and checked on unpack. A damaged file fails. It never returns wrong data.
 

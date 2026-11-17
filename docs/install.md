@@ -3,11 +3,11 @@
 pulse-agent needs Node 18 or later.
 
 ```sh
-npm install -g memory-pulse-agent
+npm install -g github:CrewRiz/pulse-agent
 pulse-agent --help
 ```
 
-The package is `memory-pulse-agent`. The command it installs is `pulse-agent`.
+That installs from the public repository. The command is `pulse-agent`. The source is at [github.com/CrewRiz/pulse-agent](https://github.com/CrewRiz/pulse-agent), MIT licensed.
 
 ## Set up a project
 
@@ -42,5 +42,7 @@ No test command: pass one on each run with `--verify "<command>"`, or add `"veri
 ```sh
 npm uninstall -g memory-pulse-agent
 ```
+
+(`memory-pulse-agent` is the package's name once installed.)
 
 The agent's state lives in each project, in `.memory-pulse/` and `.pulse-agent/`. Delete those folders to remove it.

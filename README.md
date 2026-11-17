@@ -14,11 +14,11 @@ and nothing the agent learns is kept unless that command passed.
 ## Install
 
 ```sh
-npm install -g memory-pulse-agent     # the command is pulse-agent
+npm install -g github:CrewRiz/pulse-agent     # the command is pulse-agent
 ```
 
-Node 18 or later. The npm name `pulse-agent` belongs to another project, so the
-package is `memory-pulse-agent`.
+Node 18 or later. The package is named `memory-pulse-agent`, because the npm
+name `pulse-agent` belongs to another project.
 
 ## Set up a project
 

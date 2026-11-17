@@ -33,7 +33,7 @@ pulse-agent init --base-url http://127.0.0.1:9000/v1
 
 The one requirement is that the model emits tool calls. `init` tests this for real: it offers the model one tool and asks it to call it.
 
-Passing that probe is necessary, not enough. In our own runs a 1.5 billion parameter model passed the probe, then on a real bug-fix task answered in prose, never edited the file, and failed its check. A 70 billion parameter model fixed the same bug in five steps. If a small model keeps failing checks, use a larger one.
+Passing that probe does not show that a model can finish a task. In our own runs on 17 November 2026, Qwen2.5 1.5B (4-bit, on an MLX server) passed the probe. Given a one-line bug to fix, it answered in prose, never edited the file, and failed its check. Llama 3.3 70B on a hosted endpoint fixed the same bug in five steps. If a small model keeps failing checks, use a larger one.
 
 Name a model yourself with `pulse-agent init --model <name>`. If it does not call the tool, `init` says so and saves nothing.
 
