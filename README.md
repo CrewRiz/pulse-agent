@@ -184,12 +184,24 @@ CI.
 
 ## Subagents
 
-The builder can hand a self-contained question to a subagent with the
-`delegate` tool. The child starts with a fresh context, gets only its role's
-tools, cannot delegate further and writes nothing to the ledger. Two roles can
-be delegated to, both read-only: `scout` (list, search and read files) and
-`evaluator` (read files and run your check). Several delegations in one turn
-run at the same time.
+The builder can hand a self-contained piece of work to a subagent with the
+`delegate` tool. A child starts with a fresh context, gets only its role's
+tools, cannot delegate further, writes nothing to the ledger, and is bound by
+the same approval rules as its parent. Several delegations in one turn run at
+the same time.
+
+| Role | What it can do |
+|---|---|
+| `scout` | list, search and read files |
+| `evaluator` | read files and run your check |
+| `worker` | edit files and run commands, in its own git worktree |
+
+A worker never edits the shared checkout. It works in a worktree cut from the
+project's current commit, so two workers cannot collide. When it finishes, its
+changes come back as a patch with a work id, and nothing is applied until the
+builder calls `apply_work`. A patch that no longer fits is refused whole. At
+most three workers run at once. Outside a git repository, or with no commit, a
+worker is refused; it is not run in place.
 
 ## Connectors
 
@@ -255,7 +267,7 @@ repository: a ledger holds your project's history.
   same major Node version that packed it; if the arithmetic ever differs, unpack fails on the checksum.
 - This version has been run end to end on two small tasks against one hosted
   model, and against scripted models, fake model servers and a fake MCP server
-  in its 70 tests. Onboarding has been run against one live local model server,
+  in its 74 tests. Onboarding has been run against one live local model server,
   and chat, streaming and context recall against one hosted model; connectors,
   team runs and delegation have run against fakes only. In the live run with the
   learned read on, the engine answered and named no correction on a 7-row

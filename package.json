@@ -1,6 +1,6 @@
 {
   "name": "memory-pulse-agent",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "description": "pulse-agent: a coding agent that improves only on evidence. Runs on any OpenAI-compatible model, local or hosted; its memory is a memory-pulse ledger.",
   "type": "module",
   "bin": { "pulse-agent": "cli.mjs" },

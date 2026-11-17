@@ -41,7 +41,7 @@ test("delegate refuses a role that may not be delegated to, and several delegati
   const bad = scripted([{ tool_calls: [["delegate", { role: "builder", task: "do it all" }]] }, { content: "ok" }]);
   const rb = await runTask({ root, task: "t", model: bad });
   // asserted on what was recorded, not inside the model function: a failure there is swallowed by the delegation's own error handling
-  assert.equal(bad.seen.length, 2, "no child agent was started"); assert.match(bad.seen[1].messages.at(-1).content, /can delegate only to: scout, evaluator/); assert.equal(rb.delegated, 0);
+  assert.equal(bad.seen.length, 2, "no child agent was started"); assert.match(bad.seen[1].messages.at(-1).content, /can delegate only to: scout, evaluator, worker/); assert.equal(rb.delegated, 0);
   let active = 0, peak = 0;
   const slow = async ({ messages, tools }) => {
     const names = tools.map((t) => t.function.name);

@@ -48,8 +48,9 @@
 | `builder` | Read, list, search, write and edit files, run commands (also in the background), delegate, propose a skill, use connectors. |
 | `scout` | List, search and read files. |
 | `evaluator` | Read files and run your check. |
+| `worker` | Edit files and run commands in its own git worktree. Its changes come back as a patch the builder applies with `apply_work`. |
 
-The builder can delegate a question to a scout or an evaluator. A subagent starts with a fresh context and cannot delegate further.
+The builder can delegate to a scout, an evaluator or a worker. A subagent starts with a fresh context, cannot delegate further, and is bound by the same approval rules. A worker needs a git repository with at least one commit; without one it is refused.
 
 ## Environment
 
