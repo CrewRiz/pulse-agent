@@ -30,6 +30,7 @@
 | `--context-budget <n>` | Characters the conversation may hold before older material moves to the recoverable store. Default 200000. |
 | `--yes` | Allow every edit, command and connector call for this run. Deny rules still apply. |
 | `--json` | `run` and `team`: one JSON object per line, ending with an `end` object that carries the verdict. |
+| `--no-script` | Do not offer the script tool. |
 | `--no-learned` | Do not ask the memory-pulse engine, even with a key set. |
 
 ## Inside a chat
@@ -45,7 +46,7 @@
 
 | Role | Tools |
 |---|---|
-| `builder` | Read, list, search, write and edit files, run commands (also in the background), delegate, propose a skill, use connectors. |
+| `builder` | Read, list, search, write and edit files, run scripts over tools, run commands (also in the background), delegate, propose a skill, use connectors. |
 | `scout` | List, search and read files. |
 | `evaluator` | Read files and run your check. |
 | `worker` | Edit files and run commands in its own git worktree. Its changes come back as a patch the builder applies with `apply_work`. |

@@ -167,6 +167,34 @@ summarise, and always a plain record of the work done. Each time, a checkpoint
 row goes into the ledger with the store's head hash. A changed store entry
 fails its hash and is never returned.
 
+## Token cost
+
+Three things keep a run cheap, and the run tells you what it spent.
+
+**Scripts over tools.** For work that needs several tool calls or large results,
+the model can write a short script that calls the tools, works on what they
+return, and prints only what it needs. The files it read never enter the
+conversation. The script runs in a separate Node process under Node's
+permission model: it cannot write files, read outside its own folder, start
+processes or use the network. Its only way to act is to ask for a tool call,
+and each one passes the same role limits and approval rules as a call the model
+makes directly. If that confinement cannot be confirmed on your Node version,
+the tool is not offered. `--no-script` turns it off.
+
+**Connector tools on demand.** A few connector tools are sent with each request
+as usual. A large set (more than 12 tools, or more than about 6,000 characters
+of definitions) is not: the model gets `find_tool` and `call_tool` instead, and
+looks up what it needs.
+
+**Context that moves out, losslessly.** See the section on chat and sessions.
+
+Each run prints the tokens the endpoint reported, and `--json` carries them.
+One measurement, one run each way, on 17 November 2026 with Llama 3.3 70B on a
+hosted endpoint: finding the largest value across eight files took 7,119 input
+tokens over 4 model calls without scripts and 3,923 over 2 calls with them,
+with the same correct answer. A builder's own tool definitions and system
+prompt come to about 4,700 characters per request.
+
 ## Background commands, forks and scripts
 
 The builder can start a long-running command (a dev server, a watcher) with
@@ -267,8 +295,9 @@ repository: a ledger holds your project's history.
   same major Node version that packed it; if the arithmetic ever differs, unpack fails on the checksum.
 - This version has been run end to end against one hosted model on four small
   tasks: a bug fix, a chat with context recall, a run with the learned read on,
-  and a bug fix delegated to a worker in a worktree and applied. Onboarding has
-  been run against one live local model server. Everything else in its 74 tests
+  a bug fix delegated to a worker in a worktree and applied, and a search
+  across files with and without scripts. Onboarding has
+  been run against one live local model server. Everything else in its 81 tests
   runs against scripted models, fake model servers and a fake MCP server:
   connectors, team runs, background commands and the terminal approval prompt
   have not been exercised by a live model. Treat it as new.

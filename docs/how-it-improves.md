@@ -42,6 +42,10 @@ pulse-agent team "make the date parser accept ISO week dates"
 
 The builder does the task. Then an evaluator reviews the change. The evaluator did not build it, has no tool that writes, can run only your check, and is not shown the builder's account of its own work. The check is still the verdict. The review goes in the ledger.
 
+## What a run costs
+
+Each run prints the tokens the model endpoint reported. Two things keep the number down. The model can write a short script that calls tools and prints only what it needs, so the files it read never enter the conversation; the script runs confined and can act only through the same tools and approval rules. And a large set of connector tools is searched on demand instead of being sent with every request.
+
 ## Memory that says no
 
 The ledger is `.memory-pulse/events.jsonl`, a [memory-pulse](https://www.npmjs.com/package/memory-pulse) ledger.

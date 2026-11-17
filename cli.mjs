@@ -30,7 +30,7 @@ usage: pulse-agent <command> [options]          (run it in the project you want 
         set this project up without questions: find a model server running on this machine (Ollama, LM Studio, llama.cpp,
         MLX, vLLM), pick the first model that really calls a tool, find the project's own test command, and save
         .pulse-agent/config.json. Run it once per project.
-  run "<task>" [--verify "<command>"] [--role builder|evaluator] [--model M] [--base-url URL] [--max-steps N] [--max-rounds N] [--no-learned] [--yes] [--json]
+  run "<task>" [--verify "<command>"] [--role builder|evaluator] [--model M] [--base-url URL] [--max-steps N] [--max-rounds N] [--no-learned] [--yes] [--json] [--no-script]
         work on the task with tools confined to this directory. With --verify, that command decides whether the task
         succeeded (exit 0 = pass); a failure goes back to the model, up to --max-rounds times (default 3).
         Exit code: 0 pass or unverified, 2 the check failed, 1 an error.
@@ -162,18 +162,19 @@ async function main() {
     const baseUrl = opt("--base-url") ?? process.env.PULSE_AGENT_BASE_URL ?? cfg.baseUrl, apiKey = opt("--api-key") ?? process.env.PULSE_AGENT_API_KEY, verify = opt("--verify") ?? cfg.verify;
     const asJson = argv.includes("--json"), say = asJson ? () => {} : console.log;                // --json: one JSON object per line, the last of type "end", and nothing else on stdout
     const show = (e) => asJson ? process.stdout.write(JSON.stringify(e) + "\n") : e.type === "delta" ? process.stdout.write(e.text) : console.log(`${e.who ? `[${e.who}] ` : ""}${e.type === "context" ? `  context: ${e.stored} item(s) moved to the recoverable store` : e.type === "tool" ? `  ${e.refused ? "refused" : e.ok ? "ok     " : "failed "} ${e.name}${e.args?.path ? ` ${e.args.path}` : e.args?.command ? ` ${String(e.args.command).slice(0, 80)}` : ""}` : e.type === "connector" ? `  connector ${e.name} did not start: ${e.reason}` : `  check ${e.ok ? "passed" : `failed (exit ${e.code})`}`}`);
-    const common = { root, task, verify, stream: argv.includes("--stream"), maxSteps: num("--max-steps", 30), maxRounds: num("--max-rounds", 3), ...projectSetup(verify), onEvent: show,
+    const common = { root, task, verify, stream: argv.includes("--stream"), script: !argv.includes("--no-script"), maxSteps: num("--max-steps", 30), maxRounds: num("--max-rounds", 3), ...projectSetup(verify), onEvent: show,
       learned: argv.includes("--no-learned") || !process.env.MEMORY_PULSE_KEY ? null : { key: process.env.MEMORY_PULSE_KEY, api: process.env.MEMORY_PULSE_API },
       model: openaiCompatible({ baseUrl, model, apiKey }) };
     let r, review = null;
     if (cmd === "team") { const t = await runTeam({ ...common, evalModel: opt("--eval-model") ? openaiCompatible({ baseUrl, model: opt("--eval-model"), apiKey }) : undefined }); r = t.build; review = t.review; }
     else r = await runTask({ ...common, role });
-    if (asJson) process.stdout.write(JSON.stringify({ type: "end", verdict: r.verdict, stopped: r.stopped, steps: r.steps, rounds: r.rounds, changed: r.changed, answer: r.answer, refused: r.refused, session: r.session, review }) + "\n");
+    if (asJson) process.stdout.write(JSON.stringify({ type: "end", verdict: r.verdict, stopped: r.stopped, steps: r.steps, rounds: r.rounds, changed: r.changed, answer: r.answer, refused: r.refused, session: r.session, usage: r.usage, review }) + "\n");
     if (r.drift.length) say(`ledger: ${r.drift.length} row(s) may bear on this task, ${r.drift.filter((d) => d.closed).length} closed or failed (shown to the model)`);
     if (r.learned) say(r.learned.unavailable ? `learned read unavailable: ${r.learned.unavailable}` : `learned read: ${r.learned.hits.length} correction(s) named (${r.learned.rung})`);
     if (r.answer) say(`\n${r.answer}\n`);
     say(`verdict: ${r.verdict}${r.stopped ? ` (stopped at the ${r.stopped})` : ""} · ${r.steps} step(s)${r.rounds ? ` · ${r.rounds} check round(s)` : ""}`);
     say(`files changed: ${r.changed.join(", ") || "none"}`);
+    say(r.usage.reported ? `tokens: ${r.usage.input.toLocaleString("en-US")} in, ${r.usage.output.toLocaleString("en-US")} out over ${r.usage.calls} model call(s)` : `tokens: not reported by this endpoint (${r.usage.calls} model call(s))`);
     if (cmd === "team") say(review ? `\nevaluator's review:\n${review}\n` : "no review: nothing changed, or the check failed");
     if (r.refused) say(`${r.refused} tool call(s) were refused by the approval rules. Allow one with: pulse-agent allow "<rule>", or rerun with --yes to allow everything.`);
     if (r.proposed.length) say(`skills proposed (held for you): ${r.proposed.join(", ")} — pulse-agent skills`);

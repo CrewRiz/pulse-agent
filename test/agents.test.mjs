@@ -18,7 +18,7 @@ test("list_files and search read the workspace without a shell, skip dependency 
   assert.match((await execute("search", { pattern: "nothing-like-this" }, ctx(root))).output, /no match/);
   assert.equal((await execute("search", { pattern: "(" }, ctx(root))).ok, false, "a bad pattern is an error, not a crash");
   assert.equal((await execute("list_files", { path: "../.." }, ctx(root))).ok, false);
-  assert.deepEqual([...ROLES.scout.tools].sort(), ["list_files", "read_file", "search"]);
+  assert.deepEqual([...ROLES.scout.tools].sort(), ["list_files", "read_file", "script", "search"]);
   assert.equal((await execute("write_file", { path: "x", content: "y" }, ctx(root))).refused, true);
 });
 
@@ -32,7 +32,7 @@ test("delegate: the builder hands a question to a scout with a fresh context and
   ]);
   const events = []; const r = await runTask({ root, task: "find and report the price", model, onEvent: (e) => events.push(e) });
   assert.equal(r.answer, "It is in a.js."); assert.equal(existsSync(join(root, "hack.txt")), false, "the scout's write was refused");
-  assert.deepEqual(model.seen[1].tools.sort(), ["list_files", "read_file", "search"], "a subagent cannot delegate further and cannot write");
+  assert.deepEqual(model.seen[1].tools.sort(), ["list_files", "read_file", "script", "search"], "a subagent cannot delegate further and cannot write");
   assert.ok(events.some((e) => e.who === "scout" && e.type === "tool" && e.refused)); assert.equal(r.delegated, 1);
 });
 
