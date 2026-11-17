@@ -49,6 +49,12 @@ pulse-agent allow "mcp:web__*"
 
 A remote MCP server on Cloudflare Workers, or any other host, works this way. When the connectors together offer more than 12 tools, the model is given a search over them instead of every definition.
 
+## Tokens and rules without extra steps
+
+Keep a token once with `printf %s "$TOKEN" | pulse-agent secret set MY_TOKEN`. It goes into a file outside every project that only you can read, and `${MY_TOKEN}` in a connector header is filled from the environment first and from that file second. The value is read from standard input so it never lands in your shell history.
+
+Add `--allow "tool_a,tool_b"` to `connectors add` to let those tools run without asking. `pulse-agent allow --global "<rule>"` applies any rule in every project. A global rule that would allow every command or every edit is refused.
+
 ## The web
 
 `web_search` and `web_fetch` are built in and need no paid search API. A page is fetched directly, and rendered by a browser already on your machine when it needs one. A search reads a search engine's results page. To read pages through a connector instead, such as a browser worker, set `"web": { "via": "mcp__<server>__<tool>" }` in your personal settings.

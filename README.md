@@ -268,6 +268,22 @@ builder calls `apply_work`. A patch that no longer fits is refused whole. At
 most three workers run at once. Outside a git repository, or with no commit, a
 worker is refused; it is not run in place.
 
+### Tokens and rules without extra steps
+
+A connector's token does not have to live in your shell profile. Keep it once in
+your personal secrets, a file outside every project that only you can read, and
+`${NAME}` in a header is filled from the environment first and from there second:
+
+```
+printf %s "$TOKEN" | pulse-agent secret set MY_TOKEN
+pulse-agent connectors add files --global --url https://example.com/mcp \
+  --header 'Authorization: Bearer ${MY_TOKEN}' --allow "read,list"
+```
+
+`--allow` lets the named tools run without asking, in every project when the
+connector is global. `pulse-agent allow --global "<rule>"` does the same for any
+rule. A global rule that would allow every command or every edit is refused.
+
 ## The web
 
 `web_search` and `web_fetch` need no paid search API. A page is fetched
@@ -367,7 +383,7 @@ repository: a ledger holds your project's history.
   tasks: a bug fix, a chat with context recall, a run with the learned read on,
   a bug fix delegated to a worker in a worktree and applied, a search
   across files with and without scripts, and a web search with a page read. Onboarding has
-  been run against one live local model server. Everything else in its 103 tests
+  been run against one live local model server. Everything else in its 106 tests
   runs against scripted models, fake model servers and a fake MCP server:
   connectors, team runs, background commands and the terminal approval prompt
   have not been exercised by a live model. Treat it as new.

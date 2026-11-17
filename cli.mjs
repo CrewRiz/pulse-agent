@@ -20,7 +20,7 @@ import { createJobs } from "./lib/jobs.mjs";
 import { shell } from "./lib/tools.mjs";
 import { makePolicy } from "./lib/approve.mjs";
 import { loadSoul, soulSetting, setSoul, personalSettings } from "./lib/soul.mjs";
-import { projectExtras, trust, isTrusted, personalRules, addRule, personalConnectors, savePersonalConnectors } from "./lib/trust.mjs";
+import { projectExtras, trust, isTrusted, personalRules, addRule, personalConnectors, savePersonalConnectors, globalRules, addGlobalRule, globalRuleOk, secretNames, setSecret, removeSecret } from "./lib/trust.mjs";
 import { openSync, readSync, writeSync, closeSync } from "node:fs";
 
 const HELP = `pulse-agent — a coding agent that improves only on evidence
@@ -52,10 +52,13 @@ usage: pulse-agent <command> [options]          (run it in the project you want 
         an optional persistent identity. With soul mode on, the agent opens every run as itself: its name, its persona and
         its notes about you, read from a memory-pulse agent ledger that is the same in every project and on every host. It
         cannot change them from here. Without an argument: shows whether it is on and what the ledger holds.
+  secret set NAME | list | remove NAME
+        keep a connector token outside every project, readable by you alone; the value is read from standard input.
+        A connector header uses it as \${NAME}. connectors add ... --allow "tool_a,tool_b" lets those tools run without asking.
   trust [--revoke]
         say that this project is yours to trust. Until you do, nothing it ships is loaded: instruction files (AGENTS.md,
         CLAUDE.md), skills, hooks, connectors, or approval rules in its config. Trust is recorded outside the project.
-  allow "<rule>"
+  allow [--global] "<rule>"
         allow something without being asked, for this project: run:npm test, run:git *, edit:src/*, mcp:files__*,
         web:search (searching), web:docs.python.org (reading one site), web:* (any public site).
         By default the agent may edit files in the project and run your check; any other command needs a rule, a yes
@@ -95,7 +98,7 @@ function projectSetup(verify, { interactive = false } = {}) {
   if (x.held.length) console.error(`not loaded, because this project is not trusted yet: ${x.held.join(", ")}. Look at them, then run \`pulse-agent trust\`.`);
   const ask = interactive && process.stdin.isTTY ? async (q) => { let fd; try { fd = openSync("/dev/tty", "r+"); writeSync(fd, `\n  allow ${q.text} ?  [y]es once, [a]lways, [n]o: `); const b = Buffer.alloc(64), n = readSync(fd, b, 0, 64); return b.toString("utf8", 0, n).trim() || "n"; } catch { return "n"; } finally { if (fd !== undefined) closeSync(fd); } } : null;
   const policy = makePolicy(argv.includes("--yes") ? { mode: "auto", deny: x.approvals?.deny ?? [] } : { mode: x.approvals?.mode ?? "ask", deny: x.approvals?.deny ?? [],
-    allow: ["edit:*", ...(verify ? [`run:${verify}`] : []), ...(x.approvals?.allow ?? []), ...personalRules(root)], approver: ask, onRule: (r) => { addRule(root, r); console.error(`  saved: ${r}`); } });
+    allow: ["edit:*", ...(verify ? [`run:${verify}`] : []), ...(x.approvals?.allow ?? []), ...personalRules(root), ...globalRules()], approver: ask, onRule: (r) => { addRule(root, r); console.error(`  saved: ${r}`); } });
   return { policy, hooks: x.hooks, instructions: x.instructions, projectSkills: x.skills, mcpServers: x.mcpServers };
 }
 const VALUED = new Set(["--verify", "--role", "--model", "--base-url", "--api-key", "--max-steps", "--max-rounds", "--eval-model", "--resume", "--context-budget", "--at", "--name", "--url", "--header", "--command", "--arg", "--tools"]);
@@ -126,7 +129,19 @@ async function main() {
     console.log(`${was ? "already trusted" : "trusted"}: ${root}\n${x.held.length ? `now loaded on each run: ${x.held.join(", ")}` : "this project ships nothing that needs trust (no instruction files, skills, hooks, connectors or approval rules)"}\nundo with: pulse-agent trust --revoke`);
     return;
   }
-  if (cmd === "allow") { const rule = positional[0]; if (!rule || !/^(run|edit|mcp|web):.+/.test(rule)) fail('usage: pulse-agent allow "<rule>"   for example: pulse-agent allow "run:npm test"   or "run:git *", "edit:src/*", "mcp:files__*", "web:search", "web:docs.python.org", "web:*"'); console.log(`allowed for this project: ${addRule(root, rule).join("   ")}`); return; }
+  if (cmd === "allow") { const rule = positional[0], everywhere = argv.includes("--global");
+    if (!rule || !/^(run|edit|mcp|web):.+/.test(rule)) fail(`usage: pulse-agent allow [--global] "<rule>"   for example: pulse-agent allow "run:npm test"   or "run:git *", "edit:src/*", "mcp:files__*", "web:search", "web:docs.python.org", "web:*"\n--global applies the rule in every project.${globalRules().length ? `\nglobal rules in force: ${globalRules().join("   ")}` : ""}`);
+    if (everywhere) { if (!globalRuleOk(rule)) fail(`"${rule}" is too wide for every project; allow it per project instead`); return console.log(`allowed in every project: ${addGlobalRule(rule).join("   ")}`); }
+    console.log(`allowed for this project: ${addRule(root, rule).join("   ")}`); return; }
+  if (cmd === "secret") { const [sub, name, extra] = positional;
+    if (sub === "list" || !sub) return console.log(secretNames().length ? secretNames().join("\n") : "no secrets kept. Keep one with: pulse-agent secret set NAME   (the value is read from standard input)");
+    if (!name || !/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) fail("usage: pulse-agent secret set NAME | remove NAME | list   (a name is letters, digits and _)");
+    if (sub === "remove") { removeSecret(name); return console.log(`removed ${name}`); }
+    if (sub !== "set") fail("usage: pulse-agent secret set NAME | remove NAME | list");
+    if (extra !== undefined) fail("give the value on standard input, not on the command line (it would stay in your shell history): printf %s \"$VALUE\" | pulse-agent secret set NAME");
+    if (process.stdin.isTTY) process.stderr.write(`value for ${name} (then Enter, then Ctrl-D): `);
+    let v = ""; for await (const d of process.stdin) v += d; v = v.replace(/\r?\n$/, ""); if (!v) fail("the value is empty");
+    setSecret(name, v); return console.log(`${name} kept in your personal secrets (outside every project, readable by you alone). Connectors use it as \${${name}}.`); }
   if (cmd === "connectors") {
     const all = (n) => argv.flatMap((a, i) => (a === n && argv[i + 1] !== undefined ? [argv[i + 1]] : []));
     if (positional[0] === "add" || positional[0] === "remove") {
@@ -140,6 +155,9 @@ async function main() {
         const tools = opt("--tools") ? opt("--tools").split(",").map((t) => t.trim()).filter(Boolean) : null;
         store[name] = url ? { url, ...(Object.keys(headers).length ? { headers } : {}), ...(tools ? { tools } : {}) } : { command, ...(all("--arg").length ? { args: all("--arg") } : {}), ...(tools ? { tools } : {}) };
       }
+      const allowed = positional[0] === "add" && opt("--allow") ? opt("--allow").split(",").map((t) => t.trim()).filter((t) => /^[A-Za-z0-9_*-]+$/.test(t)) : [];
+      for (const t of allowed) { const r = `mcp:${name}__${t}`; if (global) { if (!globalRuleOk(r)) fail(`"${r}" is too wide for every project`); addGlobalRule(r); } else addRule(root, r); }
+      if (allowed.length) console.log(`allowed without asking: ${allowed.join(", ")}`);
       if (global) savePersonalConnectors(store); else { const { saveConfig } = await import("./lib/onboard.mjs"); saveConfig(root, { ...loadConfig(root), mcpServers: store }); }
       return console.log(positional[0] === "remove" ? `removed ${global ? "personal" : "project"} connector ${name}` : `${global ? "personal" : "project"} connector ${name} saved${global ? " (applies in every project)" : "; run `pulse-agent trust` here before it is used"}. Each call still needs an approval rule: pulse-agent allow "mcp:${name}__*"`);
     }

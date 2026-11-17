@@ -9,7 +9,8 @@
 | `pulse-agent team "<task>"` | The builder works, then an evaluator that cannot write reviews the change. |
 | `pulse-agent soul` | Show the agent's persistent identity. `on` or `off` turns soul mode on for every project. |
 | `pulse-agent trust` | Load what this project ships: instruction files, skills, hooks, connectors, approval rules. `--revoke` undoes it. |
-| `pulse-agent allow "<rule>"` | Allow something without being asked: `run:npm test`, `run:git *`, `edit:src/*`, `mcp:files__*`, `web:search`, `web:docs.python.org`. |
+| `pulse-agent allow [--global] "<rule>"` | Allow something without being asked: `run:npm test`, `run:git *`, `edit:src/*`, `mcp:files__*`, `web:search`, `web:docs.python.org`. With `--global`, in every project. |
+| `pulse-agent secret set NAME` | Keep a connector token in your personal secrets; the value is read from standard input. Also `secret list` and `secret remove NAME`. |
 | `pulse-agent skills` | List proposed and accepted skills. `show`, `accept`, `reject <name>`. |
 | `pulse-agent lessons` | What verified runs taught. |
 | `pulse-agent connectors` | Start each configured MCP server and list its tools. |
