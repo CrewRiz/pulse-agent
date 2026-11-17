@@ -149,3 +149,16 @@ test("run --json prints one JSON object per line and ends with the verdict; sess
   const f = await run(root, ["sessions", "fork", end.session, "--at", "1", "--name", "branch"]); assert.equal(f.code, 0, f.out); assert.match(f.out, /files in the project are not restored/);
   assert.match((await run(root, ["sessions"])).out, /branch {2}1 turn/); assert.equal((await run(root, ["sessions", "fork", "nope", "--at", "1"])).code, 1);
 });
+
+test("personal connectors live outside every project, apply in all of them without trust, and are added from the command line into a file only you can read", async () => {
+  const fake = join(fileURLToPath(new URL(".", import.meta.url)), "fixtures", "fake-mcp.mjs"); const { statSync } = await import("node:fs");
+  const root = workspace();
+  const a = await run(root, ["connectors", "add", "mine", "--global", "--command", process.execPath, "--arg", fake, "--tools", "echo"]); assert.equal(a.code, 0, a.out); assert.match(a.out, /personal connector mine/);
+  const file = join(process.env.PULSE_AGENT_HOME, "connectors.json"); assert.equal(statSync(file).mode & 0o777, 0o600);
+  const l = await run(root, ["connectors"]); assert.equal(l.code, 0, l.out); assert.match(l.out, /mine \(personal\): echo/);
+  const other = workspace(); assert.match((await run(other, ["connectors"])).out, /mine \(personal\): echo/, "it is there in a project that was never set up or trusted");
+  const h = await run(root, ["connectors", "add", "web", "--global", "--url", "http://127.0.0.1:1/mcp", "--header", "Authorization: Bearer ${SOME_TOKEN}"]); assert.equal(h.code, 0, h.out);
+  const saved = JSON.parse(readFileSync(file, "utf8")); assert.deepEqual(saved.web, { url: "http://127.0.0.1:1/mcp", headers: { Authorization: "Bearer ${SOME_TOKEN}" } });
+  assert.equal((await run(root, ["connectors", "add", "bad name", "--global", "--url", "x"])).code, 1); assert.equal((await run(root, ["connectors", "add", "x", "--global"])).code, 1);
+  const rm = await run(root, ["connectors", "remove", "mine", "--global"]); assert.equal(rm.code, 0); assert.ok(!/mine/.test((await run(root, ["connectors"])).out));
+});

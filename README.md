@@ -249,7 +249,10 @@ command or reached over HTTP, the open standard other
 agents use for tools, so servers written for them work here unchanged. Add them
 to `.pulse-agent/config.json` under `mcpServers`, in the same shape other agents
 use, optionally with a `tools` allowlist, and check them with
-`pulse-agent connectors`. The builder can call them; the evaluator cannot. A
+`pulse-agent connectors`. The builder can call them; the evaluator cannot.
+A personal connector, added with `pulse-agent connectors add <name> --global`,
+is kept outside every project and applies in all of them. A token is written
+as `${NAME}` and filled from your environment when the connector starts. A
 connector runs with your user's permissions and is not confined to the project.
 
 ## Team runs
@@ -308,7 +311,7 @@ repository: a ledger holds your project's history.
   tasks: a bug fix, a chat with context recall, a run with the learned read on,
   a bug fix delegated to a worker in a worktree and applied, and a search
   across files with and without scripts. Onboarding has
-  been run against one live local model server. Everything else in its 86 tests
+  been run against one live local model server. Everything else in its 88 tests
   runs against scripted models, fake model servers and a fake MCP server:
   connectors, team runs, background commands and the terminal approval prompt
   have not been exercised by a live model. Treat it as new.

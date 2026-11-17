@@ -71,3 +71,15 @@ test("a connector over HTTP: JSON or event-stream replies, the session header ca
     }
   } finally { srv.close(); }
 });
+
+test("a connector's token comes from the environment, not from the project file: ${NAME} is filled in at connect time, and a name that is not set stops the connector", async () => {
+  const seen = []; const srv = createServer((req, res) => { const c = []; req.on("data", (d) => c.push(d)); req.on("end", () => { const m = JSON.parse(Buffer.concat(c).toString("utf8") || "{}"); seen.push(req.headers.authorization); if (m.id === undefined) { res.writeHead(202); return res.end(); }
+    res.writeHead(200, { "content-type": "application/json" }); res.end(JSON.stringify({ jsonrpc: "2.0", id: m.id, result: m.method === "tools/list" ? { tools: [{ name: "t", inputSchema: { type: "object" } }] } : { protocolVersion: "2024-11-05", capabilities: {} } })); }); });
+  await new Promise((ok) => srv.listen(0, "127.0.0.1", ok)); const url = `http://127.0.0.1:${srv.address().port}/mcp`;
+  try {
+    process.env.PA_TEST_TOKEN = "s3cret-value";
+    const set = await connectAll({ a: { url, headers: { authorization: "Bearer ${PA_TEST_TOKEN}" } }, b: { url, headers: { authorization: "Bearer ${PA_TEST_NOT_SET}" } } });
+    assert.deepEqual(set.tools.map((t) => t.function.name), ["mcp__a__t"]); assert.ok(seen.every((h) => h === "Bearer s3cret-value"), "the literal placeholder was never sent");
+    assert.equal(set.failed.length, 1); assert.match(set.failed[0].reason, /PA_TEST_NOT_SET is not set/); assert.ok(!set.failed[0].reason.includes("s3cret")); set.close();
+  } finally { srv.close(); delete process.env.PA_TEST_TOKEN; }
+});

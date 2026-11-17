@@ -36,6 +36,19 @@ pulse-agent connectors
 
 Each tool reaches the model as `mcp__<server>__<tool>`.
 
+## Personal connectors
+
+A connector you want in every project is added once, outside any project:
+
+```sh
+pulse-agent connectors add web --global --url https://your-worker.example/mcp --header "Authorization: Bearer ${WEB_MCP_TOKEN}"
+pulse-agent allow "mcp:web__*"
+```
+
+`${NAME}` in a header is filled from your environment when the connector starts, so the token is not written into a file a project shares. If the variable is not set, the connector is not started and the placeholder is never sent. Personal connectors are kept in a file only you can read and need no project to be trusted. `pulse-agent connectors remove <name> --global` takes one away.
+
+A remote MCP server on Cloudflare Workers, or any other host, works this way. When the connectors together offer more than 12 tools, the model is given a search over them instead of every definition.
+
 ## Who can use them
 
 The builder can. The evaluator cannot: it reads files and runs your check, and nothing else.

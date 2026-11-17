@@ -19,7 +19,7 @@ import { openContext, forkSession } from "./lib/context.mjs";
 import { createJobs } from "./lib/jobs.mjs";
 import { shell } from "./lib/tools.mjs";
 import { makePolicy } from "./lib/approve.mjs";
-import { projectExtras, trust, isTrusted, personalRules, addRule } from "./lib/trust.mjs";
+import { projectExtras, trust, isTrusted, personalRules, addRule, personalConnectors, savePersonalConnectors } from "./lib/trust.mjs";
 import { openSync, readSync, writeSync, closeSync } from "node:fs";
 
 const HELP = `pulse-agent — a coding agent that improves only on evidence
@@ -43,8 +43,9 @@ usage: pulse-agent <command> [options]          (run it in the project you want 
         restore files.
   team "<task>" [same options as run] [--eval-model M]
         the builder does the task; then an evaluator that did not build it and cannot write reviews the change.
-  connectors
-        start each connector in .pulse-agent/config.json ("mcpServers", the same shape other agents use) and list its tools.
+  connectors [add <name> --global --url <endpoint> --header "K: V" | add <name> --global --command <program> --arg <a> | remove <name> --global]
+        start each connector and list its tools. A personal connector (--global) is kept outside every project and applies
+        in all of them; a project's own are in .pulse-agent/config.json ("mcpServers", the same shape other agents use) and list its tools.
         A connector is any MCP server. The builder can call them; the evaluator cannot.
   trust [--revoke]
         say that this project is yours to trust. Until you do, nothing it ships is loaded: instruction files (AGENTS.md,
@@ -83,7 +84,7 @@ function projectSetup(verify, { interactive = false } = {}) {
     allow: ["edit:*", ...(verify ? [`run:${verify}`] : []), ...(x.approvals?.allow ?? []), ...personalRules(root)], approver: ask, onRule: (r) => { addRule(root, r); console.error(`  saved: ${r}`); } });
   return { policy, hooks: x.hooks, instructions: x.instructions, projectSkills: x.skills, mcpServers: x.mcpServers };
 }
-const VALUED = new Set(["--verify", "--role", "--model", "--base-url", "--api-key", "--max-steps", "--max-rounds", "--eval-model", "--resume", "--context-budget", "--at", "--name"]);
+const VALUED = new Set(["--verify", "--role", "--model", "--base-url", "--api-key", "--max-steps", "--max-rounds", "--eval-model", "--resume", "--context-budget", "--at", "--name", "--url", "--header", "--command", "--arg", "--tools"]);
 const opt = (name) => { const i = argv.indexOf(name); return i >= 0 ? argv[i + 1] : undefined; };
 const positional = argv.slice(1).filter((a, i, all) => !a.startsWith("--") && !VALUED.has(all[i - 1]));
 const fail = (msg, code = 1) => { console.error(msg); process.exit(code); };
@@ -104,11 +105,28 @@ async function main() {
   }
   if (cmd === "allow") { const rule = positional[0]; if (!rule || !/^(run|edit|mcp):.+/.test(rule)) fail('usage: pulse-agent allow "<rule>"   for example: pulse-agent allow "run:npm test"   or "run:git *", "edit:src/*", "mcp:files__*"'); console.log(`allowed for this project: ${addRule(root, rule).join("   ")}`); return; }
   if (cmd === "connectors") {
-    if (!isTrusted(root) && loadConfig(root).mcpServers) fail("this project's connectors are not started until you trust it: look at .pulse-agent/config.json, then run `pulse-agent trust`");
-    const servers = loadConfig(root).mcpServers ?? {}; if (!Object.keys(servers).length) return console.log('no connectors configured. Add MCP servers under "mcpServers" in .pulse-agent/config.json, for example:\n  { "mcpServers": { "files": { "command": "npx", "args": ["-y", "<an MCP server package>"], "tools": ["read"] } } }');
+    const all = (n) => argv.flatMap((a, i) => (a === n && argv[i + 1] !== undefined ? [argv[i + 1]] : []));
+    if (positional[0] === "add" || positional[0] === "remove") {
+      const name = positional[1], global = argv.includes("--global");
+      if (!name || !/^[a-zA-Z0-9_-]+$/.test(name)) fail(`usage: pulse-agent connectors ${positional[0]} <name> [--global] ...   (a name is letters, digits, - and _)`);
+      const store = global ? personalConnectors() : (loadConfig(root).mcpServers ?? {});
+      if (positional[0] === "remove") delete store[name];
+      else {
+        const url = opt("--url"), command = opt("--command"); if (!url && !command) fail('give --url <mcp endpoint> or --command <program> (with --arg for each argument). A token belongs in the environment: --header "Authorization: Bearer ${MY_TOKEN}"');
+        const headers = Object.fromEntries(all("--header").map((h) => { const i = h.indexOf(":"); return [h.slice(0, i).trim(), h.slice(i + 1).trim()]; }).filter(([k]) => k));
+        const tools = opt("--tools") ? opt("--tools").split(",").map((t) => t.trim()).filter(Boolean) : null;
+        store[name] = url ? { url, ...(Object.keys(headers).length ? { headers } : {}), ...(tools ? { tools } : {}) } : { command, ...(all("--arg").length ? { args: all("--arg") } : {}), ...(tools ? { tools } : {}) };
+      }
+      if (global) savePersonalConnectors(store); else { const { saveConfig } = await import("./lib/onboard.mjs"); saveConfig(root, { ...loadConfig(root), mcpServers: store }); }
+      return console.log(positional[0] === "remove" ? `removed ${global ? "personal" : "project"} connector ${name}` : `${global ? "personal" : "project"} connector ${name} saved${global ? " (applies in every project)" : "; run `pulse-agent trust` here before it is used"}. Each call still needs an approval rule: pulse-agent allow "mcp:${name}__*"`);
+    }
+    const mine = personalConnectors(), proj = loadConfig(root).mcpServers ?? {}, trusted = isTrusted(root);
+    if (!trusted && Object.keys(proj).length) console.log("this project's own connectors are not started until you trust it: look at .pulse-agent/config.json, then run `pulse-agent trust`");
+    const servers = { ...(trusted ? proj : {}), ...mine };
+    if (!Object.keys(servers).length) { console.log('no connectors configured. Add one for every project:  pulse-agent connectors add <name> --global --url <mcp endpoint> --header "Authorization: Bearer ${MY_TOKEN}"\nor for this project only, under "mcpServers" in .pulse-agent/config.json'); process.exit(!trusted && Object.keys(proj).length ? 1 : 0); }
     const set = await connectAll(servers);
-    try { for (const name of Object.keys(servers)) { const f = set.failed.find((x) => x.name === name); console.log(f ? `${name}: FAILED: ${f.reason}` : `${name}: ${set.tools.filter((t) => t.function.name.startsWith(`mcp__${name}__`)).map((t) => t.function.name.split("__")[2]).join(", ") || "no tools"}`); } } finally { set.close(); }
-    process.exit(set.failed.length ? 1 : 0);
+    try { for (const name of Object.keys(servers)) { const f = set.failed.find((x) => x.name === name), tag = mine[name] ? " (personal)" : ""; console.log(f ? `${name}${tag}: FAILED: ${f.reason}` : `${name}${tag}: ${set.tools.filter((t) => t.function.name.startsWith(`mcp__${name}__`)).map((t) => t.function.name.split("__")[2]).join(", ") || "no tools"}`); } } finally { set.close(); }
+    process.exit(set.failed.length || (!trusted && Object.keys(proj).length) ? 1 : 0);
   }
   if (cmd === "sessions") {
     if (positional[0] === "fork") { const from = positional[1]; if (!from || !opt("--at")) fail("usage: pulse-agent sessions fork <session> --at <turn> [--name <new>]"); const r = forkSession(root, from, { at: Number(opt("--at")), name: opt("--name") ?? `${from}-fork-${Date.now().toString(36)}` }); console.log(r.output); process.exit(r.ok ? 0 : 1); }
