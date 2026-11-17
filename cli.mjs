@@ -8,12 +8,15 @@ import { openaiCompatible } from "./lib/provider.mjs";
 import { openMemory } from "./lib/memory.mjs";
 import { openSkills } from "./lib/skills.mjs";
 import { ROLES } from "./lib/roles.mjs";
+import { pack, unpack } from "./lib/pack.mjs";
+import { buildCapsule, verifyCapsule, importCapsule } from "memory-pulse/server.mjs";
+import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
 
 const HELP = `pulse-agent — a coding agent that improves only on evidence
 
 usage: pulse-agent <command> [options]          (run it in the project you want it to work on)
 
-  run "<task>" [--verify "<command>"] [--role builder|evaluator] [--model M] [--base-url URL] [--max-steps N] [--max-rounds N]
+  run "<task>" [--verify "<command>"] [--role builder|evaluator] [--model M] [--base-url URL] [--max-steps N] [--max-rounds N] [--no-learned]
         work on the task with tools confined to this directory. With --verify, that command decides whether the task
         succeeded (exit 0 = pass); a failure goes back to the model, up to --max-rounds times (default 3).
         Exit code: 0 pass or unverified, 2 the check failed, 1 an error.
@@ -21,6 +24,10 @@ usage: pulse-agent <command> [options]          (run it in the project you want 
         procedures the agent proposed after verified runs. A proposal is never used until you accept it.
   lessons
         what verified runs taught: a check that failed, then passed, and which files changed in between.
+  state export | verify <file> | import <file>
+        export packs the ledger into a .rain state capsule (hash-chained rows, verified before packing) and compresses it
+        to .pulse-agent/state/<time>.rainz. verify checks a file end to end. import restores or fast-forwards the ledger
+        here from one, and refuses a damaged file or a ledger that diverged.
   sync  commit the agent's state (.memory-pulse ledger, .pulse-agent skills) to git here and push if a remote exists.
 
 Model: any endpoint that speaks the OpenAI chat-completions shape with tool calls, local or hosted.
@@ -29,7 +36,9 @@ Model: any endpoint that speaks the OpenAI chat-completions shape with tool call
   PULSE_AGENT_API_KEY    only if your endpoint needs one
 
 Memory: a memory-pulse ledger in .memory-pulse/events.jsonl. Its corrections block a write that puts a withdrawn value
-back, and before each task the ledger is asked whether the same thing was already tried and closed.`;
+back, and before each task the ledger is asked whether the same thing was already tried and closed.
+  MEMORY_PULSE_KEY       optional. With a key, each run also asks memory-pulse's engine which corrections bear on the
+                         task (the learned read). That sends the ledger's rows to the engine. --no-learned turns it off.`;
 
 const argv = process.argv.slice(2), cmd = argv[0], root = process.cwd();
 const VALUED = new Set(["--verify", "--role", "--model", "--base-url", "--api-key", "--max-steps", "--max-rounds"]);
@@ -46,9 +55,11 @@ async function main() {
     const role = opt("--role") ?? "builder"; if (!ROLES[role]) fail(`no role named ${role}; roles: ${Object.keys(ROLES).join(", ")}`);
     const num = (n, d) => { const v = opt(n); if (v === undefined) return d; const x = Number(v); if (!Number.isInteger(x) || x < 1) fail(`${n} must be a whole number of 1 or more`); return x; };
     const r = await runTask({ root, task, role, verify: opt("--verify"), maxSteps: num("--max-steps", 30), maxRounds: num("--max-rounds", 3),
+      learned: argv.includes("--no-learned") || !process.env.MEMORY_PULSE_KEY ? null : { key: process.env.MEMORY_PULSE_KEY, api: process.env.MEMORY_PULSE_API },
       model: openaiCompatible({ baseUrl: opt("--base-url") ?? process.env.PULSE_AGENT_BASE_URL, model, apiKey: opt("--api-key") ?? process.env.PULSE_AGENT_API_KEY }),
       onEvent: (e) => console.log(e.type === "tool" ? `  ${e.refused ? "refused" : e.ok ? "ok     " : "failed "} ${e.name}${e.args?.path ? ` ${e.args.path}` : e.args?.command ? ` ${String(e.args.command).slice(0, 80)}` : ""}` : `  check ${e.ok ? "passed" : `failed (exit ${e.code})`}`) });
     if (r.drift.length) console.log(`ledger: ${r.drift.length} row(s) may bear on this task, ${r.drift.filter((d) => d.closed).length} closed or failed (shown to the model)`);
+    if (r.learned) console.log(r.learned.unavailable ? `learned read unavailable: ${r.learned.unavailable}` : `learned read: ${r.learned.hits.length} correction(s) named (${r.learned.rung})`);
     if (r.answer) console.log(`\n${r.answer}\n`);
     console.log(`verdict: ${r.verdict}${r.stopped ? ` (stopped at the ${r.stopped})` : ""} · ${r.steps} step(s)${r.rounds ? ` · ${r.rounds} check round(s)` : ""}`);
     console.log(`files changed: ${r.changed.join(", ") || "none"}`);
@@ -65,6 +76,23 @@ async function main() {
     fail(`unknown skills command ${sub}`);
   }
   if (cmd === "lessons") { const ls = openMemory(root).lessons(20); if (!ls.length) return console.log("no lessons yet: a lesson is recorded when a --verify check fails and then passes"); for (const l of ls) console.log(`t${l.t}  ${l.text}`); return; }
+  if (cmd === "state") {
+    const [sub, file] = positional, mem = openMemory(root), kb = (n) => `${(n / 1024).toFixed(1)} KB`;
+    const open = (f) => { if (!f) fail(`usage: pulse-agent state ${sub} <file>`); let cap; try { cap = JSON.parse(unpack(readFileSync(f)).toString("utf8")); } catch (e) { fail(`${f}: ${e.message}`); } const v = verifyCapsule(cap); if (!v.ok) fail(`${f}: not a valid state capsule: ${v.reason}`); return cap; };
+    if (sub === "export") {
+      const b = buildCapsule({ ledger: mem.path }); if (b.error) fail(b.error);
+      const raw = Buffer.from(JSON.stringify(b.capsule)), packed = pack(raw), dir = join(root, ".pulse-agent", "state"); mkdirSync(dir, { recursive: true });
+      const out = join(dir, `${new Date().toISOString().replace(/[-:]/g, "").replace(/\..*/, "Z")}.rainz`); writeFileSync(out, packed);
+      return console.log(`${b.capsule.rows} row(s) through t=${b.capsule.through}, capsule ${kb(raw.length)}, packed ${kb(packed.length)} (${(100 * packed.length / raw.length).toFixed(0)}%)\n${out}`);
+    }
+    if (sub === "verify") { const cap = open(file); return console.log(`verified: ${cap.rows} row(s) through t=${cap.through}, issued ${cap.issued}, head ${String(cap.head).slice(0, 12)}`); }
+    if (sub === "import") {
+      const cap = open(file), old = process.env.MEMORY_PULSE_LEDGER; process.env.MEMORY_PULSE_LEDGER = mem.path;
+      const r = importCapsule(cap); if (old === undefined) delete process.env.MEMORY_PULSE_LEDGER; else process.env.MEMORY_PULSE_LEDGER = old;
+      console.log(`${r.status}${r.appended ? `: ${r.appended} row(s)` : ""}${r.reason ? `: ${r.reason}` : ""}`); process.exit(r.code ? 1 : 0);
+    }
+    fail("usage: pulse-agent state export | verify <file> | import <file>");
+  }
   if (cmd === "sync") {
     if (!existsSync(join(root, ".git"))) git(["init", "-q"]);
     const paths = [".memory-pulse/events.jsonl", ".pulse-agent"].filter((p) => existsSync(join(root, p))); if (!paths.length) return console.log("nothing to sync: no ledger and no skills here yet");

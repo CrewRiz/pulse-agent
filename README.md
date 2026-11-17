@@ -80,6 +80,22 @@ ledger. Rows that describe the same thing are shown to the model, and rows that
 record a closed or failed attempt are marked. This match is on words, so it can
 miss a repeat that is phrased differently.
 
+## The learned read
+
+The two checks above match words. memory-pulse's engine goes further: it learns
+from the ledger's own vocabulary which corrections bear on a task, including
+ones your wording never names. pulse-agent asks it before each run when a key is
+set:
+
+```sh
+export MEMORY_PULSE_KEY=...        # from your memory-pulse account
+pulse-agent run "..." --verify "npm test"
+```
+
+Using it sends the ledger's rows to the engine. Without a key nothing leaves
+your machine, and `--no-learned` turns it off for one run. If the engine cannot
+be reached, the run goes on with the local checks and says so.
+
 ## Roles
 
 A role is a brief and a list of tools. The list is enforced where tools run, so
@@ -97,12 +113,26 @@ pulse-agent run "review the date parser change" --role evaluator --verify "npm t
 ## Keeping state
 
 ```sh
-pulse-agent sync
+pulse-agent state export            # .pulse-agent/state/<time>.rainz
+pulse-agent state verify <file>
+pulse-agent state import <file>     # in another checkout or on another machine
+pulse-agent sync                    # commit ledger, skills and state to git; push if a remote exists
 ```
 
-commits the ledger and the skills to git in the project and pushes if a remote
-exists. Only those two paths are staged. Use a private repository: a ledger
-holds your project's history.
+`state export` packs the ledger into a `.rain` capsule, memory-pulse's state
+format: every row with its hash chain, verified before it is packed. The capsule
+is then compressed with a packer built for this kind of text, a context-mixing
+coder in the PAQ family. `import` restores or fast-forwards a ledger from a file
+and refuses one that is damaged or whose history diverged from yours.
+
+Measured on one real ledger of 4,236 rows (4.78 MB): the packer produced
+1.40 MB, against 1.49 MB for brotli at its maximum setting and 1.90 MB for
+gzip -9. It is slow by comparison: about 9 seconds to pack and 17 to unpack on a
+laptop. The original bytes' SHA-256 is stored in the file and checked on
+unpack, so a damaged file fails and never returns wrong data.
+
+`sync` stages only the ledger and the `.pulse-agent` directory. Use a private
+repository: a ledger holds your project's history.
 
 ## Limits
 
@@ -113,9 +143,12 @@ holds your project's history.
 - One provider shape: OpenAI-compatible chat completions with tool calls.
 - A small model may answer in prose and never call a tool. The run then ends
   with a failed check and nothing is learned.
-- The ledger is stored as plain JSON lines. It is not compressed.
-- Version 0.1.0 has been run end to end on one small bug-fix task against one
-  hosted model, and against scripted models in its 20 tests. Treat it as new.
+- The packer keeps about 70 MB of model state in memory while it runs, and a packed file should be unpacked by the
+  same major Node version that packed it; if the arithmetic ever differs, unpack fails on the checksum.
+- This version has been run end to end on two small tasks against one hosted
+  model, and against scripted models in its 27 tests. In the live run with the
+  learned read on, the engine answered and named no correction on a 7-row
+  ledger. Treat it as new.
 
 ## Development
 
