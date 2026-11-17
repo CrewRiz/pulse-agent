@@ -20,26 +20,35 @@ npm install -g memory-pulse-agent     # the command is pulse-agent
 Node 18 or later. The npm name `pulse-agent` belongs to another project, so the
 package is `memory-pulse-agent`.
 
-## Run it
-
-With a local model (nothing leaves your machine):
+## Set up a project
 
 ```sh
-ollama serve                                   # or any OpenAI-compatible server
 cd your-project
-pulse-agent run "fix the failing date parser test" --model <your model> --verify "npm test"
+pulse-agent init
 ```
 
-With a hosted endpoint:
+`init` asks no questions. It finds a model server already running on your
+machine (Ollama, LM Studio, llama.cpp, an MLX server or vLLM), asks each model
+to call a tool and keeps the first one that really does, finds the project's
+own test command, and saves `.pulse-agent/config.json`. Nothing leaves your
+machine.
+
+Then:
 
 ```sh
-export PULSE_AGENT_BASE_URL=https://your-endpoint/v1
-export PULSE_AGENT_API_KEY=...
-pulse-agent run "fix the failing date parser test" --model <model> --verify "npm test"
+pulse-agent run "fix the failing date parser test"
+pulse-agent team "fix the failing date parser test"     # builder, then a reviewer that cannot write
 ```
 
-The model needs to support tool calls. Exit code 0 means the check passed (or no
-check was given), 2 means the check failed, 1 means an error.
+For a hosted endpoint instead:
+
+```sh
+export PULSE_AGENT_API_KEY=...
+pulse-agent init --base-url https://your-endpoint/v1 --model <model>
+```
+
+Exit code 0 means the check passed (or no check was configured), 2 means the
+check failed, 1 means an error. Full documentation is in `docs/`.
 
 ## How it improves
 
@@ -110,6 +119,22 @@ a model cannot argue its way past it.
 pulse-agent run "review the date parser change" --role evaluator --verify "npm test"
 ```
 
+## Connectors
+
+A connector is any Model Context Protocol (MCP) server, the open standard other
+agents use for tools, so servers written for them work here unchanged. Add them
+to `.pulse-agent/config.json` under `mcpServers`, in the same shape other agents
+use, optionally with a `tools` allowlist, and check them with
+`pulse-agent connectors`. The builder can call them; the evaluator cannot. A
+connector runs with your user's permissions and is not confined to the project.
+
+## Team runs
+
+`pulse-agent team "<task>"` runs the builder, then an evaluator that did not
+build the change, has no tool that writes, can run only your check, and is not
+shown the builder's own account of its work. The check is still the verdict. The
+review is kept in the ledger.
+
 ## Keeping state
 
 ```sh
@@ -141,12 +166,15 @@ repository: a ledger holds your project's history.
   throwaway checkout for work you do not trust, and prefer the evaluator role
   when you only want a review.
 - One provider shape: OpenAI-compatible chat completions with tool calls.
+- A connector is not confined to the project. Configure only servers you trust.
 - A small model may answer in prose and never call a tool. The run then ends
   with a failed check and nothing is learned.
 - The packer keeps about 70 MB of model state in memory while it runs, and a packed file should be unpacked by the
   same major Node version that packed it; if the arithmetic ever differs, unpack fails on the checksum.
 - This version has been run end to end on two small tasks against one hosted
-  model, and against scripted models in its 27 tests. In the live run with the
+  model, and against scripted models, fake model servers and a fake MCP server
+  in its 38 tests. Onboarding, connectors and team runs have not yet been run
+  against a live local model. In the live run with the
   learned read on, the engine answered and named no correction on a 7-row
   ledger. Treat it as new.
 

@@ -18,9 +18,9 @@ const call = (name, args) => ({ role: "assistant", content: null, tool_calls: [{
 
 test("help names every command; an unknown command and a run without a model say what to do and exit 1", async () => {
   const root = workspace();
-  const h = await run(root, ["--help"]); assert.equal(h.code, 0); for (const w of ["run", "skills", "lessons", "sync", "state export", "--verify", "--role", "--no-learned", "PULSE_AGENT_MODEL", "MEMORY_PULSE_KEY"]) assert.match(h.out, new RegExp(w));
+  const h = await run(root, ["--help"]); assert.equal(h.code, 0); for (const w of ["run", "skills", "lessons", "sync", "state export", "--verify", "--role", "--no-learned", "PULSE_AGENT_MODEL", "MEMORY_PULSE_KEY", "init", "team", "connectors"]) assert.match(h.out, new RegExp(w));
   const u = await run(root, ["frobnicate"]); assert.equal(u.code, 1); assert.match(u.out, /unknown command/);
-  const n = await run(root, ["run", "do a thing"]); assert.equal(n.code, 1); assert.match(n.out, /PULSE_AGENT_MODEL|--model/);
+  const n = await run(root, ["run", "do a thing"]); assert.equal(n.code, 1); assert.match(n.out, /pulse-agent init/);
 });
 
 test("run: a task goes through a real HTTP model endpoint, the check decides, and the exit code is the verdict", async () => {
@@ -67,4 +67,25 @@ test("state: export writes a packed .rain capsule, verify checks it, import rest
   const bad = join(dir, "bad.rainz"); copyFileSync(file, bad); const { openSync, writeSync, closeSync } = await import("node:fs"); const fd = openSync(bad, "r+"); writeSync(fd, Buffer.from([0x5a]), 0, 1, statSync(bad).size - 9); closeSync(fd);
   const no = await run(workspace(), ["state", "import", bad]); assert.equal(no.code, 1); assert.match(no.out, /does not match|corrupt/);
   const none = await run(workspace(), ["state", "export"]); assert.equal(none.code, 1); assert.match(none.out, /no ledger/);
+});
+
+test("init then run: a project is set up from a running model server with no flags, and run needs none either", async () => {
+  // the fake answers /v1/models too, and calls whatever tool it is offered when the script says so
+  const models = createServer((req, res) => { const c = []; req.on("data", (d) => c.push(d)); req.on("end", () => { res.setHeader("content-type", "application/json"); if (req.url === "/v1/models") return res.end(JSON.stringify({ data: [{ id: "local-coder" }] })); const b = JSON.parse(Buffer.concat(c).toString("utf8")); const t = b.tools?.[0]?.function?.name; const said = b.messages.some((m) => m.role === "tool"); res.end(JSON.stringify({ choices: [{ message: t === "report_ready" ? { content: "", tool_calls: [{ id: "c", type: "function", function: { name: t, arguments: "{}" } }] } : said ? { content: "done" } : call("write_file", { path: "ok.txt", content: "ok" }) }] })); }); });
+  await new Promise((ok) => models.listen(0, "127.0.0.1", ok)); const url = `http://127.0.0.1:${models.address().port}/v1`;
+  try {
+    const root = workspace(); writeFileSync(join(root, "Makefile"), "test:\n\ttest -f ok.txt\n");
+    const i = await run(root, ["init", "--base-url", url]); assert.equal(i.code, 0, i.out); assert.match(i.out, /local-coder: calls tools/); assert.match(i.out, /make test/);
+    assert.deepEqual(JSON.parse(readFileSync(join(root, ".pulse-agent", "config.json"), "utf8")), { model: "local-coder", baseUrl: url, verify: "make test" });
+    const r = await run(root, ["run", "create ok.txt"]); assert.equal(r.code, 0, r.out); assert.match(r.out, /verdict: pass/); assert.ok(existsSync(join(root, "ok.txt")));
+    const t = await run(root, ["team", "create ok.txt again"]); assert.equal(t.code, 0, t.out); assert.match(t.out, /\[builder\]/); assert.match(t.out, /evaluator's review|no review/);
+    const none = await run(workspace(), ["init", "--base-url", "http://127.0.0.1:1/v1"]); assert.equal(none.code, 1); assert.match(none.out, /No local model server/);
+  } finally { models.close(); }
+});
+
+test("connectors: lists each configured MCP server's tools, names one that fails, and says how to add one when there are none", async () => {
+  const root = workspace(); const fake = join(fileURLToPath(new URL(".", import.meta.url)), "fixtures", "fake-mcp.mjs");
+  assert.match((await run(root, ["connectors"])).out, /no connectors configured/);
+  mkdirSync(join(root, ".pulse-agent"), { recursive: true }); writeFileSync(join(root, ".pulse-agent", "config.json"), JSON.stringify({ mcpServers: { files: { command: process.execPath, args: [fake], tools: ["echo"] }, gone: { command: "/nonexistent/x" } } }));
+  const c = await run(root, ["connectors"]); assert.equal(c.code, 1); assert.match(c.out, /files: echo/); assert.match(c.out, /gone: FAILED/);
 });
