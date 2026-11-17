@@ -18,6 +18,12 @@ Put it in `.pulse-agent/config.json`, in the same shape other agents use:
 }
 ```
 
+A server reached over HTTP takes a `url` instead of a command:
+
+```json
+{ "mcpServers": { "kb": { "url": "https://example.com/mcp", "headers": { "authorization": "Bearer <token>" }, "tools": ["lookup"] } } }
+```
+
 `tools` is optional. With it, the model is offered only the tools you name.
 
 Connectors in a project's config are started only after you run `pulse-agent trust` there. Each call also needs an approval rule, for example `pulse-agent allow "mcp:files__*"`, or `--yes`.

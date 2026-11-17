@@ -139,3 +139,13 @@ test("trust from the command line: a project's AGENTS.md reaches the model only 
     await run(root, ["trust", "--revoke"]); await run(root, args); assert.ok(!bodies[2].messages[0].content.includes("MARKER-RULE-42"));
   } finally { srv.close(); }
 });
+
+test("run --json prints one JSON object per line and ends with the verdict; sessions fork branches a session from the command line", async () => {
+  script = [call("write_file", { path: "j.txt", content: "1" }), { role: "assistant", content: "wrote it" }]; calls = 0;
+  const root = workspace(); const r = await run(root, ["run", "write j.txt", "--model", "m", "--base-url", base, "--verify", "test -f j.txt", "--json"]);
+  assert.equal(r.code, 0, r.out); const lines = r.out.trim().split("\n").map((l) => JSON.parse(l));
+  assert.ok(lines.some((e) => e.type === "tool" && e.name === "write_file" && e.ok)); assert.ok(lines.some((e) => e.type === "check" && e.ok));
+  const end = lines.at(-1); assert.equal(end.type, "end"); assert.equal(end.verdict, "pass"); assert.deepEqual(end.changed, ["j.txt"]); assert.equal(end.answer, "wrote it"); assert.match(end.session, /^s-/);
+  const f = await run(root, ["sessions", "fork", end.session, "--at", "1", "--name", "branch"]); assert.equal(f.code, 0, f.out); assert.match(f.out, /files in the project are not restored/);
+  assert.match((await run(root, ["sessions"])).out, /branch {2}1 turn/); assert.equal((await run(root, ["sessions", "fork", "nope", "--at", "1"])).code, 1);
+});

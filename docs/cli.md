@@ -5,7 +5,7 @@
 | `pulse-agent init` | Set this project up: find a local model that calls tools, find the test command, save the config. |
 | `pulse-agent run "<task>"` | Work on a task. The check decides the verdict. |
 | `pulse-agent chat` | An interactive session. Replies stream; the conversation carries across turns. `--resume <session>` continues one. |
-| `pulse-agent sessions` | List this project's sessions. |
+| `pulse-agent sessions` | List this project's sessions. `fork <session> --at <turn>` branches one; files are not restored. |
 | `pulse-agent team "<task>"` | The builder works, then an evaluator that cannot write reviews the change. |
 | `pulse-agent trust` | Load what this project ships: instruction files, skills, hooks, connectors, approval rules. `--revoke` undoes it. |
 | `pulse-agent allow "<rule>"` | Allow something without being asked: `run:npm test`, `run:git *`, `edit:src/*`, `mcp:files__*`. |
@@ -29,6 +29,7 @@
 | `--stream` | `run` and `team`: print the reply as it is written. `chat` always streams. |
 | `--context-budget <n>` | Characters the conversation may hold before older material moves to the recoverable store. Default 200000. |
 | `--yes` | Allow every edit, command and connector call for this run. Deny rules still apply. |
+| `--json` | `run` and `team`: one JSON object per line, ending with an `end` object that carries the verdict. |
 | `--no-learned` | Do not ask the memory-pulse engine, even with a key set. |
 
 ## Inside a chat
@@ -44,7 +45,7 @@
 
 | Role | Tools |
 |---|---|
-| `builder` | Read, list, search, write and edit files, run commands, delegate, propose a skill, use connectors. |
+| `builder` | Read, list, search, write and edit files, run commands (also in the background), delegate, propose a skill, use connectors. |
 | `scout` | List, search and read files. |
 | `evaluator` | Read files and run your check. |
 

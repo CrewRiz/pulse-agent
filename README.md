@@ -167,6 +167,21 @@ summarise, and always a plain record of the work done. Each time, a checkpoint
 row goes into the ledger with the store's head hash. A changed store entry
 fails its hash and is never returned.
 
+## Background commands, forks and scripts
+
+The builder can start a long-running command (a dev server, a watcher) with
+`run_background`, keep working, read what it has printed since the last look,
+and stop it. Starting one needs the same approval as any command. At most four
+run at once, and whatever is still running when the run or the chat ends is
+stopped.
+
+`pulse-agent sessions fork <session> --at <turn>` branches a session at an
+earlier turn. It branches the conversation; it does not restore files.
+
+`pulse-agent run "<task>" --json` prints one JSON object per line (each tool
+call, each check, and a final `end` object with the verdict), for scripts and
+CI.
+
 ## Subagents
 
 The builder can hand a self-contained question to a subagent with the
@@ -178,7 +193,8 @@ run at the same time.
 
 ## Connectors
 
-A connector is any Model Context Protocol (MCP) server, the open standard other
+A connector is any Model Context Protocol (MCP) server, started as a local
+command or reached over HTTP, the open standard other
 agents use for tools, so servers written for them work here unchanged. Add them
 to `.pulse-agent/config.json` under `mcpServers`, in the same shape other agents
 use, optionally with a `tools` allowlist, and check them with
@@ -239,7 +255,7 @@ repository: a ledger holds your project's history.
   same major Node version that packed it; if the arithmetic ever differs, unpack fails on the checksum.
 - This version has been run end to end on two small tasks against one hosted
   model, and against scripted models, fake model servers and a fake MCP server
-  in its 65 tests. Onboarding has been run against one live local model server,
+  in its 70 tests. Onboarding has been run against one live local model server,
   and chat, streaming and context recall against one hosted model; connectors,
   team runs and delegation have run against fakes only. In the live run with the
   learned read on, the engine answered and named no correction on a 7-row
