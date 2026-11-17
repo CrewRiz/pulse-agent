@@ -18,7 +18,7 @@ const call = (name, args) => ({ role: "assistant", content: null, tool_calls: [{
 
 test("help names every command; an unknown command and a run without a model say what to do and exit 1", async () => {
   const root = workspace();
-  const h = await run(root, ["--help"]); assert.equal(h.code, 0); for (const w of ["run", "skills", "lessons", "sync", "state export", "--verify", "--role", "--no-learned", "PULSE_AGENT_MODEL", "MEMORY_PULSE_KEY", "init", "team", "connectors"]) assert.match(h.out, new RegExp(w));
+  const h = await run(root, ["--help"]); assert.equal(h.code, 0); for (const w of ["run", "skills", "lessons", "sync", "state export", "--verify", "--role", "--no-learned", "PULSE_AGENT_MODEL", "MEMORY_PULSE_KEY", "init", "team", "connectors", "chat", "sessions"]) assert.match(h.out, new RegExp(w));
   const u = await run(root, ["frobnicate"]); assert.equal(u.code, 1); assert.match(u.out, /unknown command/);
   const n = await run(root, ["run", "do a thing"]); assert.equal(n.code, 1); assert.match(n.out, /pulse-agent init/);
 });
@@ -88,4 +88,25 @@ test("connectors: lists each configured MCP server's tools, names one that fails
   assert.match((await run(root, ["connectors"])).out, /no connectors configured/);
   mkdirSync(join(root, ".pulse-agent"), { recursive: true }); writeFileSync(join(root, ".pulse-agent", "config.json"), JSON.stringify({ mcpServers: { files: { command: process.execPath, args: [fake], tools: ["echo"] }, gone: { command: "/nonexistent/x" } } }));
   const c = await run(root, ["connectors"]); assert.equal(c.code, 1); assert.match(c.out, /files: echo/); assert.match(c.out, /gone: FAILED/);
+});
+
+test("chat: an interactive session streams each reply, keeps the conversation across turns, and can be resumed by a new process", async () => {
+  const bodies = []; let n = 0;
+  const srv = createServer((req, res) => { const c = []; req.on("data", (d) => c.push(d)); req.on("end", () => { const b = JSON.parse(Buffer.concat(c).toString("utf8")); bodies.push(b); n++;
+    res.writeHead(200, { "content-type": "text/event-stream" }); for (const piece of [`reply `, `number `, `${n}`]) res.write(`data: ${JSON.stringify({ choices: [{ delta: { content: piece } }] })}\n\n`); res.end("data: [DONE]\n\n"); }); });
+  await new Promise((ok) => srv.listen(0, "127.0.0.1", ok)); const url = `http://127.0.0.1:${srv.address().port}/v1`;
+  const chat = (cwd, args, input) => new Promise((done) => { const p = execFile(process.execPath, [CLI, "chat", "--model", "m", "--base-url", url, ...args], { cwd, env: process.env, encoding: "utf8", timeout: 30000 }, (err, stdout, stderr) => done({ code: err ? (err.code ?? 1) : 0, out: stdout + stderr })); p.stdin.end(input); });
+  try {
+    const root = workspace();
+    const a = await chat(root, [], "first question\n/session\nsecond question\n/context\n/exit\n");
+    assert.equal(a.code, 0, a.out); assert.match(a.out, /reply number 1/); assert.match(a.out, /reply number 2/); assert.match(a.out, /nothing has left the window/);
+    assert.equal(bodies[0].stream, true); assert.equal(bodies[1].messages.filter((m) => m.role === "user").map((m) => m.content).join("|"), "first question|second question");
+    assert.ok(bodies[1].messages.some((m) => m.role === "assistant" && m.content === "reply number 1"), "the first reply is in the second request");
+    const id = /session: (s-[A-Za-z0-9-]+)/.exec(a.out)?.[1]; assert.ok(id, a.out);
+    const ls = await run(root, ["sessions"]); assert.match(ls.out, new RegExp(id));
+    const b = await chat(root, ["--resume", id], "third question\n"); assert.equal(b.code, 0, b.out); assert.match(b.out, /reply number 3/);
+    assert.equal(bodies[2].messages.filter((m) => m.role === "user").length, 3, "a resumed chat carries the earlier turns");
+    const none = await chat(root, ["--resume", "nope"], "x\n"); assert.equal(none.code, 1); assert.match(none.out, /no session named nope/);
+    const { openMemory } = await import("../lib/memory.mjs"); assert.equal(openMemory(root).rows().filter((e) => (e.tags ?? []).includes("run")).length, 0, "a chat turn that changed no file writes no run row");
+  } finally { srv.close(); }
 });

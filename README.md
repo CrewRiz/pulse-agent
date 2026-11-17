@@ -112,12 +112,43 @@ a model cannot argue its way past it.
 
 | Role | Tools |
 |---|---|
-| `builder` (default) | read, write and edit files, run commands, propose a skill |
+| `builder` (default) | read, list, search, write and edit files, run commands, delegate, propose a skill |
+| `scout` | list, search and read files |
 | `evaluator` | read files, run the `--verify` command and nothing else |
 
 ```sh
 pulse-agent run "review the date parser change" --role evaluator --verify "npm test"
 ```
+
+## Chat, sessions and context that is never lost
+
+```sh
+pulse-agent chat                         # replies stream as they are written
+pulse-agent sessions                     # list this project's sessions
+pulse-agent chat --resume <session>      # continue one in a new process
+```
+
+A model's window is bounded and a long session is not. When a conversation
+passes its budget, what leaves the window is not handed to a summary and
+forgotten. It is written word for word into a hash-chained store on disk, the
+window keeps a record of what was done and where each result went, and one tool,
+`recall_context`, brings any of it back exactly, by id or by a search.
+
+It happens in stages. First, with no model call, old bulky tool results are
+swapped for a one-line pointer. Only if that is not enough do old turns leave
+whole, replaced by a note: the model's own notes when there is enough to
+summarise, and always a plain record of the work done. Each time, a checkpoint
+row goes into the ledger with the store's head hash. A changed store entry
+fails its hash and is never returned.
+
+## Subagents
+
+The builder can hand a self-contained question to a subagent with the
+`delegate` tool. The child starts with a fresh context, gets only its role's
+tools, cannot delegate further and writes nothing to the ledger. Two roles can
+be delegated to, both read-only: `scout` (list, search and read files) and
+`evaluator` (read files and run your check). Several delegations in one turn
+run at the same time.
 
 ## Connectors
 
@@ -166,6 +197,12 @@ repository: a ledger holds your project's history.
   throwaway checkout for work you do not trust, and prefer the evaluator role
   when you only want a review.
 - One provider shape: OpenAI-compatible chat completions with tool calls.
+- There are no approval prompts: in a run or a chat the builder edits files and
+  runs commands without asking. Subagents are read-only. Ctrl+C during a turn
+  stops the process; the turn in progress is not saved.
+- Under a very small context budget a model can lose track of its own work.
+  The default budget is 200,000 characters; the record of work done is kept in
+  the window to prevent repeats.
 - A connector is not confined to the project. Configure only servers you trust.
 - `init` checks that a model can call a tool at all. That is not a test of
   competence: a 1.5 billion parameter model passed it and then failed a real
@@ -175,8 +212,9 @@ repository: a ledger holds your project's history.
   same major Node version that packed it; if the arithmetic ever differs, unpack fails on the checksum.
 - This version has been run end to end on two small tasks against one hosted
   model, and against scripted models, fake model servers and a fake MCP server
-  in its 38 tests. Onboarding has been run against one live local model server;
-  connectors and team runs have run against fakes only. In the live run with the
+  in its 55 tests. Onboarding has been run against one live local model server,
+  and chat, streaming and context recall against one hosted model; connectors,
+  team runs and delegation have run against fakes only. In the live run with the
   learned read on, the engine answered and named no correction on a 7-row
   ledger. Treat it as new.
 

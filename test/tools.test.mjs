@@ -51,7 +51,7 @@ test("the ledger guards a write: a withdrawn value does not go back into a file,
 test("a role's tool limits are enforced by the harness: a tool outside the role is refused and never runs", async () => {
   const root = workspace();
   assert.deepEqual(toolsFor(ROLES.evaluator).map((t) => t.function.name).sort(), ["read_file", "run_check"]);
-  assert.ok(toolsFor(ROLES.builder).length >= 5); assert.ok(TOOLS.every((t) => t.function.name && t.function.parameters));
+  assert.ok(toolsFor(ROLES.builder).length >= 8); assert.ok(TOOLS.every((t) => t.function.name && t.function.parameters));
   const w = await execute("write_file", { path: "a.txt", content: "x" }, ctx(root, "evaluator"));
   assert.equal(w.ok, false); assert.equal(w.refused, true); assert.match(w.output, /not available to the evaluator role/); assert.equal(existsSync(join(root, "a.txt")), false);
   const r = await execute("run", { command: "touch b.txt" }, ctx(root, "evaluator")); assert.equal(r.refused, true); assert.equal(existsSync(join(root, "b.txt")), false);

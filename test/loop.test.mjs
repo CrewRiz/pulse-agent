@@ -16,7 +16,7 @@ test("the loop: the model calls tools until it answers, each result goes back to
   assert.equal(readFileSync(join(root, "a.txt"), "utf8"), "one");
   assert.equal(r.answer, "wrote a.txt"); assert.equal(r.steps, 3); assert.deepEqual(r.changed, ["a.txt"]); assert.equal(r.verdict, "unverified");
   const last = model.seen[2].messages; assert.equal(last.at(-1).role, "tool"); assert.match(last.at(-1).content, /one/);
-  assert.match(sys(model), /builder/); assert.deepEqual(model.seen[0].tools.sort(), ["edit_file", "propose_skill", "read_file", "run", "write_file"]);
+  assert.match(sys(model), /builder/); assert.deepEqual(model.seen[0].tools.sort(), ["delegate", "edit_file", "list_files", "propose_skill", "read_file", "run", "search", "write_file"]);
 });
 
 test("the loop stops at its step limit and says so; a refused tool call is answered, not executed", async () => {

@@ -2,6 +2,14 @@
 
 Everything the agent knows is in two folders in your project: `.memory-pulse/` (the ledger) and `.pulse-agent/` (config, skills, state files).
 
+## Sessions and the recoverable store
+
+Each chat or run is a session in `.pulse-agent/sessions/<name>/`. It holds two files: the live conversation, and `context.jsonl`, the store for everything that has left the model's window.
+
+Nothing that leaves the window is lost. Old tool results and old turns are written to the store word for word, each entry hashed and chained to the one before. The window keeps a record of the work done and an id for each stored result. The model gets a `recall_context` tool that returns any entry exactly, by id or by a search. An entry that was changed on disk fails its hash and is not returned.
+
+Each time material moves, a checkpoint row with the store's head hash goes into the ledger, so the ledger and any `.rain` capsule made from it record where every session stood.
+
 ## Export, verify, import
 
 ```sh

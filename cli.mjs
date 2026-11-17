@@ -13,7 +13,10 @@ import { onboard, loadConfig } from "./lib/onboard.mjs";
 import { runTeam } from "./lib/team.mjs";
 import { connectAll } from "./lib/mcp.mjs";
 import { buildCapsule, verifyCapsule, importCapsule } from "memory-pulse/server.mjs";
-import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
+import { readFileSync, writeFileSync, mkdirSync, readdirSync } from "node:fs";
+import { createInterface } from "node:readline";
+import { openContext } from "./lib/context.mjs";
+import { shell } from "./lib/tools.mjs";
 
 const HELP = `pulse-agent — a coding agent that improves only on evidence
 
@@ -27,6 +30,12 @@ usage: pulse-agent <command> [options]          (run it in the project you want 
         work on the task with tools confined to this directory. With --verify, that command decides whether the task
         succeeded (exit 0 = pass); a failure goes back to the model, up to --max-rounds times (default 3).
         Exit code: 0 pass or unverified, 2 the check failed, 1 an error.
+  chat [--resume <session>] [same options as run]
+        an interactive session: replies stream as they are written, the conversation carries across turns, and what
+        leaves the model's window is stored and recoverable. /help lists its commands. The sessions command lists
+        them; --resume continues one in a new process.
+  sessions
+        list this project's chat sessions.
   team "<task>" [same options as run] [--eval-model M]
         the builder does the task; then an evaluator that did not build it and cannot write reviews the change.
   connectors
@@ -53,7 +62,7 @@ back, and before each task the ledger is asked whether the same thing was alread
                          task (the learned read). That sends the ledger's rows to the engine. --no-learned turns it off.`;
 
 const argv = process.argv.slice(2), cmd = argv[0], root = process.cwd();
-const VALUED = new Set(["--verify", "--role", "--model", "--base-url", "--api-key", "--max-steps", "--max-rounds", "--eval-model"]);
+const VALUED = new Set(["--verify", "--role", "--model", "--base-url", "--api-key", "--max-steps", "--max-rounds", "--eval-model", "--resume", "--context-budget"]);
 const opt = (name) => { const i = argv.indexOf(name); return i >= 0 ? argv[i + 1] : undefined; };
 const positional = argv.slice(1).filter((a, i, all) => !a.startsWith("--") && !VALUED.has(all[i - 1]));
 const fail = (msg, code = 1) => { console.error(msg); process.exit(code); };
@@ -72,14 +81,52 @@ async function main() {
     try { for (const name of Object.keys(servers)) { const f = set.failed.find((x) => x.name === name); console.log(f ? `${name}: FAILED: ${f.reason}` : `${name}: ${set.tools.filter((t) => t.function.name.startsWith(`mcp__${name}__`)).map((t) => t.function.name.split("__")[2]).join(", ") || "no tools"}`); } } finally { set.close(); }
     process.exit(set.failed.length ? 1 : 0);
   }
+  if (cmd === "sessions") {
+    let ids = []; try { ids = readdirSync(join(root, ".pulse-agent", "sessions")).sort(); } catch { /* none yet */ }
+    if (!ids.length) return console.log("no sessions yet: start one with `pulse-agent chat`");
+    for (const id of ids) { const c = openContext(root, id), turns = (c.load() ?? []).filter((m) => m.role === "user").length, st = c.status(); console.log(`${id}  ${turns} turn(s), ${st.stored} item(s) in the recoverable store`); }
+    return console.log("continue one with: pulse-agent chat --resume <session>");
+  }
+  if (cmd === "chat") {
+    const cfg = loadConfig(root), model = opt("--model") ?? process.env.PULSE_AGENT_MODEL ?? cfg.model; if (!model) fail("no model: run `pulse-agent init` to set this project up, or set PULSE_AGENT_MODEL or pass --model");
+    const baseUrl = opt("--base-url") ?? process.env.PULSE_AGENT_BASE_URL ?? cfg.baseUrl, apiKey = opt("--api-key") ?? process.env.PULSE_AGENT_API_KEY, verify = opt("--verify") ?? cfg.verify;
+    let sessionId = opt("--resume") ?? null, started = !!sessionId; const budget = opt("--context-budget") ? Number(opt("--context-budget")) : undefined;
+    if (started && !openContext(root, sessionId).load()) fail(`no session named ${sessionId} in this project (pulse-agent sessions lists them)`);
+    const w = (t) => process.stdout.write(t); let midLine = false;
+    const show = (e) => { if (e.type === "delta") { w(e.text); midLine = true; return; } if (midLine) { w("\n"); midLine = false; }
+      console.log(`${e.who ? `[${e.who}] ` : ""}${e.type === "tool" ? `  ${e.refused ? "refused" : e.ok ? "ok     " : "failed "} ${e.name}${e.args?.path ? ` ${e.args.path}` : e.args?.command ? ` ${String(e.args.command).slice(0, 80)}` : e.args?.task ? ` ${String(e.args.task).slice(0, 60)}` : ""}` : e.type === "context" ? `  context: ${e.stored} item(s) moved to the recoverable store (${e.total} stored)` : e.type === "connector" ? `  connector ${e.name} did not start: ${e.reason}` : `  check ${e.ok ? "passed" : `failed (exit ${e.code})`}`}`); };
+    const llm = openaiCompatible({ baseUrl, model, apiKey });
+    console.log(`pulse-agent chat: ${model}${verify ? `, check \`${verify}\` runs after a turn that changes files` : ", no check configured"}. /help for commands, /exit to leave.`);
+    const rl = createInterface({ input: process.stdin, terminal: false });
+    if (process.stdin.isTTY) w("> ");
+    for await (const raw of rl) {
+      const line = raw.trim();
+      if (!line) { if (process.stdin.isTTY) w("> "); continue; }
+      if (line === "/exit" || line === "/quit") break;
+      if (line === "/help") console.log("/session  this session's name\n/context  what has left the window and can be recalled\n/check    run the check command now\n/exit     leave (the session is saved; resume it with --resume)");
+      else if (line === "/session") console.log(sessionId ? `session: ${sessionId}` : "session: not started yet (say something first)");
+      else if (line === "/context") { const st = sessionId ? openContext(root, sessionId).status() : { stored: 0 }; console.log(st.stored ? `${st.stored} item(s), ${st.characters.toLocaleString("en-US")} characters, have left the window and can be recalled word for word` : "nothing has left the window yet"); }
+      else if (line === "/check") { if (!verify) console.log("no check command configured"); else { const v = await shell(verify, { cwd: root }); console.log(`${v.output}\ncheck ${v.ok ? "passed" : `failed (exit ${v.code})`}`); } }
+      else if (line.startsWith("/")) console.log(`unknown command ${line}; /help lists them`);
+      else {
+        const r = await runTask({ root, task: line, model: llm, verify, stream: true, quiet: true, sessionId, resume: started, onEvent: show, mcpServers: cfg.mcpServers ?? null, ...(budget ? { contextBudget: budget } : {}),
+          learned: argv.includes("--no-learned") || !process.env.MEMORY_PULSE_KEY ? null : { key: process.env.MEMORY_PULSE_KEY, api: process.env.MEMORY_PULSE_API } });
+        sessionId = r.session; started = true; if (midLine) { w("\n"); midLine = false; }
+        if (r.changed.length) console.log(`  files changed: ${r.changed.join(", ")}${r.verdict !== "unverified" ? `, verdict: ${r.verdict}` : ""}`);
+      }
+      if (process.stdin.isTTY) w("> ");
+    }
+    if (sessionId) console.log(`session: ${sessionId} (saved; pulse-agent chat --resume ${sessionId})`);
+    return;
+  }
   if (cmd === "run" || cmd === "team") {
     const cfg = loadConfig(root), task = positional.join(" ").trim(); if (!task) fail(`usage: pulse-agent ${cmd} "<task>" [--verify "<command>"]`);
     const model = opt("--model") ?? process.env.PULSE_AGENT_MODEL ?? cfg.model; if (!model) fail("no model: run `pulse-agent init` to set this project up, or set PULSE_AGENT_MODEL or pass --model");
     const role = opt("--role") ?? "builder"; if (!ROLES[role]) fail(`no role named ${role}; roles: ${Object.keys(ROLES).join(", ")}`);
     const num = (n, d) => { const v = opt(n); if (v === undefined) return d; const x = Number(v); if (!Number.isInteger(x) || x < 1) fail(`${n} must be a whole number of 1 or more`); return x; };
     const baseUrl = opt("--base-url") ?? process.env.PULSE_AGENT_BASE_URL ?? cfg.baseUrl, apiKey = opt("--api-key") ?? process.env.PULSE_AGENT_API_KEY, verify = opt("--verify") ?? cfg.verify;
-    const show = (e) => console.log(`${e.who ? `[${e.who}] ` : ""}${e.type === "tool" ? `  ${e.refused ? "refused" : e.ok ? "ok     " : "failed "} ${e.name}${e.args?.path ? ` ${e.args.path}` : e.args?.command ? ` ${String(e.args.command).slice(0, 80)}` : ""}` : e.type === "connector" ? `  connector ${e.name} did not start: ${e.reason}` : `  check ${e.ok ? "passed" : `failed (exit ${e.code})`}`}`);
-    const common = { root, task, verify, maxSteps: num("--max-steps", 30), maxRounds: num("--max-rounds", 3), mcpServers: cfg.mcpServers ?? null, onEvent: show,
+    const show = (e) => e.type === "delta" ? process.stdout.write(e.text) : console.log(`${e.who ? `[${e.who}] ` : ""}${e.type === "context" ? `  context: ${e.stored} item(s) moved to the recoverable store` : e.type === "tool" ? `  ${e.refused ? "refused" : e.ok ? "ok     " : "failed "} ${e.name}${e.args?.path ? ` ${e.args.path}` : e.args?.command ? ` ${String(e.args.command).slice(0, 80)}` : ""}` : e.type === "connector" ? `  connector ${e.name} did not start: ${e.reason}` : `  check ${e.ok ? "passed" : `failed (exit ${e.code})`}`}`);
+    const common = { root, task, verify, stream: argv.includes("--stream"), maxSteps: num("--max-steps", 30), maxRounds: num("--max-rounds", 3), mcpServers: cfg.mcpServers ?? null, onEvent: show,
       learned: argv.includes("--no-learned") || !process.env.MEMORY_PULSE_KEY ? null : { key: process.env.MEMORY_PULSE_KEY, api: process.env.MEMORY_PULSE_API },
       model: openaiCompatible({ baseUrl, model, apiKey }) };
     let r, review = null;

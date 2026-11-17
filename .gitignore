@@ -2,3 +2,4 @@ node_modules/
 .memory-pulse/
 .pulse-agent/
 *.log
+docs/internal-*
