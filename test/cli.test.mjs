@@ -18,7 +18,7 @@ const call = (name, args) => ({ role: "assistant", content: null, tool_calls: [{
 
 test("help names every command; an unknown command and a run without a model say what to do and exit 1", async () => {
   const root = workspace();
-  const h = await run(root, ["--help"]); assert.equal(h.code, 0); for (const w of ["run", "skills", "lessons", "sync", "state export", "--verify", "--role", "--no-learned", "PULSE_AGENT_MODEL", "MEMORY_PULSE_KEY", "init", "team", "connectors", "chat", "sessions", "trust", "allow", "--yes"]) assert.match(h.out, new RegExp(w));
+  const h = await run(root, ["--help"]); assert.equal(h.code, 0); for (const w of ["run", "skills", "lessons", "sync", "state export", "--verify", "--role", "--no-learned", "PULSE_AGENT_MODEL", "MEMORY_PULSE_KEY", "init", "team", "connectors", "chat", "sessions", "trust", "allow", "--yes", "soul \\[on\\|off\\]", "--no-soul"]) assert.match(h.out, new RegExp(w));
   const u = await run(root, ["frobnicate"]); assert.equal(u.code, 1); assert.match(u.out, /unknown command/);
   const n = await run(root, ["run", "do a thing"]); assert.equal(n.code, 1); assert.match(n.out, /pulse-agent init/);
 });
@@ -161,4 +161,23 @@ test("personal connectors live outside every project, apply in all of them witho
   const saved = JSON.parse(readFileSync(file, "utf8")); assert.deepEqual(saved.web, { url: "http://127.0.0.1:1/mcp", headers: { Authorization: "Bearer ${SOME_TOKEN}" } });
   assert.equal((await run(root, ["connectors", "add", "bad name", "--global", "--url", "x"])).code, 1); assert.equal((await run(root, ["connectors", "add", "x", "--global"])).code, 1);
   const rm = await run(root, ["connectors", "remove", "mine", "--global"]); assert.equal(rm.code, 0); assert.ok(!/mine/.test((await run(root, ["connectors"])).out));
+});
+
+test("soul from the command line: off by default, turned on once for every project, and a run then opens as the agent on the ledger", async () => {
+  const { execFileSync } = await import("node:child_process"); const { mkdtempSync } = await import("node:fs"); const { tmpdir } = await import("node:os");
+  const home = mkdtempSync(join(tmpdir(), "pa-soulcli-")), ledger = join(home, "agent", "events.jsonl"), MP = join(fileURLToPath(new URL(".", import.meta.url)), "..", "node_modules", "memory-pulse", "server.mjs");
+  const mp = (...a) => execFileSync(process.execPath, [MP, ...a], { cwd: home, encoding: "utf8", env: { ...process.env, HOME: home, MEMORY_PULSE_AGENT: ledger, MEMORY_PULSE_MODE: "" }, stdio: ["ignore", "pipe", "pipe"] });
+  const bodies = []; const srv = createServer((req, res) => { const c = []; req.on("data", (d) => c.push(d)); req.on("end", () => { bodies.push(JSON.parse(Buffer.concat(c).toString("utf8"))); res.writeHead(200, { "content-type": "application/json" }); res.end(JSON.stringify({ choices: [{ message: { role: "assistant", content: "ok" } }] })); }); });
+  await new Promise((ok) => srv.listen(0, "127.0.0.1", ok)); const url = `http://127.0.0.1:${srv.address().port}/v1`;
+  try {
+    const root = workspace(), env = { MEMORY_PULSE_AGENT: ledger }, args = ["run", "hello", "--model", "m", "--base-url", url];
+    assert.match((await run(root, ["soul"], env)).out, /soul mode: off/);
+    const none = await run(root, [...args, "--soul"], env); assert.equal(none.code, 0, none.out); assert.match(none.out, /no soul on the agent ledger yet/i); assert.match(bodies[0].messages[0].content, /^You are pulse-agent/);
+    mp("mode", "soul"); mp("identity", "Ada, a careful build engineer; measure before you claim"); mp("soul", "I am Ada. I say what I did not check.");
+    await run(root, args, env); assert.match(bodies[1].messages[0].content, /^You are pulse-agent/, "off until turned on");
+    assert.match((await run(root, ["soul", "on"], env)).out, /soul mode is on[\s\S]*identity: Ada, a careful build engineer/);
+    await run(workspace(), args, env); assert.match(bodies[2].messages[0].content, /^You are Ada, a careful build engineer/, "on in a project that was never set up");
+    await run(root, [...args, "--no-soul"], env); assert.match(bodies[3].messages[0].content, /^You are pulse-agent/);
+    assert.match((await run(root, ["soul", "off"], env)).out, /soul mode is off/); assert.equal((await run(root, ["soul", "sideways"], env)).code, 1);
+  } finally { srv.close(); }
 });

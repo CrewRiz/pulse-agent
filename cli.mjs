@@ -19,6 +19,7 @@ import { openContext, forkSession } from "./lib/context.mjs";
 import { createJobs } from "./lib/jobs.mjs";
 import { shell } from "./lib/tools.mjs";
 import { makePolicy } from "./lib/approve.mjs";
+import { loadSoul, soulSetting, setSoul } from "./lib/soul.mjs";
 import { projectExtras, trust, isTrusted, personalRules, addRule, personalConnectors, savePersonalConnectors } from "./lib/trust.mjs";
 import { openSync, readSync, writeSync, closeSync } from "node:fs";
 
@@ -30,7 +31,7 @@ usage: pulse-agent <command> [options]          (run it in the project you want 
         set this project up without questions: find a model server running on this machine (Ollama, LM Studio, llama.cpp,
         MLX, vLLM), pick the first model that really calls a tool, find the project's own test command, and save
         .pulse-agent/config.json. Run it once per project.
-  run "<task>" [--verify "<command>"] [--role builder|evaluator] [--model M] [--base-url URL] [--max-steps N] [--max-rounds N] [--no-learned] [--yes] [--json] [--no-script]
+  run "<task>" [--verify "<command>"] [--role builder|evaluator] [--model M] [--base-url URL] [--max-steps N] [--max-rounds N] [--no-learned] [--yes] [--json] [--no-script] [--soul | --no-soul]
         work on the task with tools confined to this directory. With --verify, that command decides whether the task
         succeeded (exit 0 = pass); a failure goes back to the model, up to --max-rounds times (default 3).
         Exit code: 0 pass or unverified, 2 the check failed, 1 an error.
@@ -47,6 +48,10 @@ usage: pulse-agent <command> [options]          (run it in the project you want 
         start each connector and list its tools. A personal connector (--global) is kept outside every project and applies
         in all of them; a project's own are in .pulse-agent/config.json ("mcpServers", the same shape other agents use) and list its tools.
         A connector is any MCP server. The builder can call them; the evaluator cannot.
+  soul [on|off]
+        an optional persistent identity. With soul mode on, the agent opens every run as itself: its name, its persona and
+        its notes about you, read from a memory-pulse agent ledger that is the same in every project and on every host. It
+        cannot change them from here. Without an argument: shows whether it is on and what the ledger holds.
   trust [--revoke]
         say that this project is yours to trust. Until you do, nothing it ships is loaded: instruction files (AGENTS.md,
         CLAUDE.md), skills, hooks, connectors, or approval rules in its config. Trust is recorded outside the project.
@@ -75,6 +80,14 @@ back, and before each task the ledger is asked whether the same thing was alread
                          task (the learned read). That sends the ledger's rows to the engine. --no-learned turns it off.`;
 
 const argv = process.argv.slice(2), cmd = argv[0], root = process.cwd();
+// the agent's persistent identity, when soul mode is on for this person (or --soul for one run) and the ledger holds one
+function soulForRun() {
+  if (argv.includes("--no-soul") || !(argv.includes("--soul") || soulSetting())) return null;
+  const s = loadSoul();
+  if (!s.found) console.error(`soul mode is on, but ${s.howto.charAt(0).toLowerCase()}${s.howto.slice(1)}\nThis run goes on as the plain agent.`);
+  else if (s.held.length || s.unchained) console.error(`soul: ${[s.held.length ? `held back (it reads like an instruction): ${s.held.join(", ")}` : "", s.unchained ? `${s.unchained} row(s) not written through memory-pulse are not honoured` : ""].filter(Boolean).join("; ")}`);
+  return s;
+}
 // what the project ships (loaded only if trusted) and the approval policy for this run
 function projectSetup(verify, { interactive = false } = {}) {
   const x = projectExtras(root);
@@ -96,6 +109,15 @@ async function main() {
     const base = opt("--base-url") ?? process.env.PULSE_AGENT_BASE_URL;
     const r = await onboard({ root, endpoints: base ? [base] : undefined, model: opt("--model"), apiKey: opt("--api-key") ?? process.env.PULSE_AGENT_API_KEY, force: argv.includes("--force") });
     console.log(r.report); process.exit(r.ok ? 0 : 1);
+  }
+  if (cmd === "soul") {
+    const sub = positional[0];
+    if (sub === "on" || sub === "off") { setSoul(sub === "on"); console.log(`soul mode is ${sub} for every project on this machine`); if (sub === "off") return; }
+    else if (sub) fail("usage: pulse-agent soul [on|off]");
+    const s = loadSoul(); console.log(`soul mode: ${soulSetting() ? "on" : "off"} (pulse-agent soul on | off; --soul or --no-soul for one run)\nagent ledger: ${s.path}`);
+    if (!s.found) return console.log(s.howto);
+    console.log(`\nidentity: ${s.self ?? "(none)"}\n\nsoul: ${s.soul ?? "(none)"}\n\nabout you: ${s.user ?? "(none)"}${s.notes.length ? `\n\nnotes: ${s.notes.length}` : ""}${s.held.length ? `\n\nheld back, not shown to the model (it reads like an instruction): ${s.held.join(", ")}` : ""}${s.unchained ? `\n\n${s.unchained} row(s) on the ledger were not written through memory-pulse and are not honoured` : ""}`);
+    return console.log("\nThe agent cannot change any of this from pulse-agent. To change it, use memory-pulse's own commands from a terminal.");
   }
   if (cmd === "trust") {
     if (argv.includes("--revoke")) { trust(root, false); return console.log("this project is no longer trusted"); }
@@ -143,10 +165,11 @@ async function main() {
     const w = (t) => process.stdout.write(t); let midLine = false;
     const show = (e) => { if (e.type === "delta") { w(e.text); midLine = true; return; } if (midLine) { w("\n"); midLine = false; }
       console.log(`${e.who ? `[${e.who}] ` : ""}${e.type === "tool" ? `  ${e.refused ? "refused" : e.ok ? "ok     " : "failed "} ${e.name}${e.args?.path ? ` ${e.args.path}` : e.args?.command ? ` ${String(e.args.command).slice(0, 80)}` : e.args?.task ? ` ${String(e.args.task).slice(0, 60)}` : ""}` : e.type === "context" ? `  context: ${e.stored} item(s) moved to the recoverable store (${e.total} stored)` : e.type === "connector" ? `  connector ${e.name} did not start: ${e.reason}` : `  check ${e.ok ? "passed" : `failed (exit ${e.code})`}`}`); };
-    const setup = projectSetup(verify, { interactive: true }); let turn = null;
+    const setup = { ...projectSetup(verify, { interactive: true }), soul: soulForRun() }; let turn = null;
     const jobs = createJobs({ cwd: root }); process.on("exit", () => jobs.killAll());            // background commands live across turns and stop when the chat ends
     process.on("SIGINT", () => { if (turn) { turn.abort(); process.stdout.write("\n  interrupting (the session is kept)...\n"); } else { if (sessionId) console.log(`\nsession: ${sessionId} (saved; pulse-agent chat --resume ${sessionId})`); process.exit(130); } });
     const llm = openaiCompatible({ baseUrl, model, apiKey });
+    if (setup.soul?.found) console.log(`${setup.soul.name} (soul mode)`);
     console.log(`pulse-agent chat: ${model}${verify ? `, check \`${verify}\` runs after a turn that changes files` : ", no check configured"}. /help for commands, /exit to leave.`);
     const rl = createInterface({ input: process.stdin, terminal: false });
     if (process.stdin.isTTY) w("> ");
@@ -180,7 +203,7 @@ async function main() {
     const baseUrl = opt("--base-url") ?? process.env.PULSE_AGENT_BASE_URL ?? cfg.baseUrl, apiKey = opt("--api-key") ?? process.env.PULSE_AGENT_API_KEY, verify = opt("--verify") ?? cfg.verify;
     const asJson = argv.includes("--json"), say = asJson ? () => {} : console.log;                // --json: one JSON object per line, the last of type "end", and nothing else on stdout
     const show = (e) => asJson ? process.stdout.write(JSON.stringify(e) + "\n") : e.type === "delta" ? process.stdout.write(e.text) : console.log(`${e.who ? `[${e.who}] ` : ""}${e.type === "context" ? `  context: ${e.stored} item(s) moved to the recoverable store` : e.type === "tool" ? `  ${e.refused ? "refused" : e.ok ? "ok     " : "failed "} ${e.name}${e.args?.path ? ` ${e.args.path}` : e.args?.command ? ` ${String(e.args.command).slice(0, 80)}` : ""}` : e.type === "connector" ? `  connector ${e.name} did not start: ${e.reason}` : `  check ${e.ok ? "passed" : `failed (exit ${e.code})`}`}`);
-    const common = { root, task, verify, stream: argv.includes("--stream"), script: !argv.includes("--no-script"), maxSteps: num("--max-steps", 30), maxRounds: num("--max-rounds", 3), ...projectSetup(verify), onEvent: show,
+    const common = { root, task, verify, stream: argv.includes("--stream"), script: !argv.includes("--no-script"), soul: soulForRun(), maxSteps: num("--max-steps", 30), maxRounds: num("--max-rounds", 3), ...projectSetup(verify), onEvent: show,
       learned: argv.includes("--no-learned") || !process.env.MEMORY_PULSE_KEY ? null : { key: process.env.MEMORY_PULSE_KEY, api: process.env.MEMORY_PULSE_API },
       model: openaiCompatible({ baseUrl, model, apiKey }) };
     let r, review = null;

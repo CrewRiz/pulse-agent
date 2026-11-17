@@ -120,6 +120,32 @@ a model cannot argue its way past it.
 pulse-agent run "review the date parser change" --role evaluator --verify "npm test"
 ```
 
+## Soul mode (optional)
+
+By default pulse-agent is a tool with a role. Turn soul mode on and it opens
+every run as itself: a name, a persona in its own words, and its notes about
+the person it works with.
+
+```sh
+pulse-agent soul            # is it on, and what does the ledger hold
+pulse-agent soul on         # for every project on this machine
+pulse-agent run "..." --no-soul
+```
+
+The identity is not a file in your project. It lives on a memory-pulse agent
+ledger, one hash-chained file for every project and every host, so the same
+agent is there in pulse-agent, in an editor that runs memory-pulse, and
+tomorrow. If you keep an OpenClaw-style `SOUL.md`, `IDENTITY.md` and `USER.md`,
+memory-pulse imports them; `pulse-agent soul` prints the commands.
+
+pulse-agent reads the soul and cannot rewrite it. A persona that an agent can
+edit while it reads a web page is a persona a web page can edit. Changes are
+made with memory-pulse's own commands, which hold a change made in a session
+that read outside content and keep every earlier version. What is read is
+screened: a row that was not written through memory-pulse is not honoured, and
+text shaped like an order to obey outside content is held back and named. A
+subagent has no soul; it gets its role and its task.
+
 ## Approvals and trust
 
 By default the agent may edit files inside the project and run your check.
@@ -311,7 +337,7 @@ repository: a ledger holds your project's history.
   tasks: a bug fix, a chat with context recall, a run with the learned read on,
   a bug fix delegated to a worker in a worktree and applied, and a search
   across files with and without scripts. Onboarding has
-  been run against one live local model server. Everything else in its 88 tests
+  been run against one live local model server. Everything else in its 95 tests
   runs against scripted models, fake model servers and a fake MCP server:
   connectors, team runs, background commands and the terminal approval prompt
   have not been exercised by a live model. Treat it as new.

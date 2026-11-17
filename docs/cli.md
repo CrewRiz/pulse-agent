@@ -7,6 +7,7 @@
 | `pulse-agent chat` | An interactive session. Replies stream; the conversation carries across turns. `--resume <session>` continues one. |
 | `pulse-agent sessions` | List this project's sessions. `fork <session> --at <turn>` branches one; files are not restored. |
 | `pulse-agent team "<task>"` | The builder works, then an evaluator that cannot write reviews the change. |
+| `pulse-agent soul` | Show the agent's persistent identity. `on` or `off` turns soul mode on for every project. |
 | `pulse-agent trust` | Load what this project ships: instruction files, skills, hooks, connectors, approval rules. `--revoke` undoes it. |
 | `pulse-agent allow "<rule>"` | Allow something without being asked: `run:npm test`, `run:git *`, `edit:src/*`, `mcp:files__*`. |
 | `pulse-agent skills` | List proposed and accepted skills. `show`, `accept`, `reject <name>`. |
@@ -31,6 +32,7 @@
 | `--yes` | Allow every edit, command and connector call for this run. Deny rules still apply. |
 | `--json` | `run` and `team`: one JSON object per line, ending with an `end` object that carries the verdict. |
 | `--no-script` | Do not offer the script tool. |
+| `--soul`, `--no-soul` | Use or leave out the persistent identity for this run. |
 | `--no-learned` | Do not ask the memory-pulse engine, even with a key set. |
 
 ## Inside a chat

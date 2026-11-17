@@ -42,6 +42,10 @@ pulse-agent team "make the date parser accept ISO week dates"
 
 The builder does the task. Then an evaluator reviews the change. The evaluator did not build it, has no tool that writes, can run only your check, and is not shown the builder's account of its own work. The check is still the verdict. The review goes in the ledger.
 
+## An identity that lasts, if you want one
+
+Soul mode is off unless you turn it on with `pulse-agent soul on`. With it, the agent opens each run as itself: its name, its persona and its notes about you, read from a memory-pulse agent ledger that is the same in every project. pulse-agent cannot change that identity. Nothing the agent reads in a file, a web page or a tool result can change it either. A subagent never has one.
+
 ## What a run costs
 
 Each run prints the tokens the model endpoint reported. Two things keep the number down. The model can write a short script that calls tools and prints only what it needs, so the files it read never enter the conversation; the script runs confined and can act only through the same tools and approval rules. And a large set of connector tools is searched on demand instead of being sent with every request.
